@@ -25,10 +25,13 @@ void SteamAPI_RegisterCallback() {};
 
 const wchar_t g_szClassName[] = L"myWindowClass";
 bool g_bAutoTurnIn = false;
-DWORD g_dwFiestaBase = 0;
 
 //DWORD* g_pwcurrentEncryptionIndex = 0;
 // 
+
+// Info box
+char* g_ucInfoTextRecv;
+char* g_ucInfoTextSent;
 
 //Hook stuff
 DWORD dwJmpBackSendLogger;
@@ -122,6 +125,65 @@ void __declspec(naked) UnlockEncryption() {
     }
 }
 
+void InspectInfoText()
+{
+    std::string strInfoTextRecv(g_ucInfoTextRecv);
+    std::string strInfoTextSent(g_ucInfoTextSent);
+
+    //cout << "Message found: " << strInfoText << endl;
+    strInfoTextSent.resize(0x20, '\0');
+    size_t sztLoc = strInfoTextSent.find("/target ");
+    if (sztLoc != std::string::npos)
+    {
+        sztLoc += 8;
+        size_t sztNameLength = 0;
+        while (strInfoTextSent[sztLoc] != '\0')
+        {
+            sztNameLength++;
+            sztLoc++;
+        }
+        g_strCharToTarget.clear();
+        g_strCharToTarget = strInfoTextSent.substr(sztLoc - sztNameLength, sztNameLength);
+
+        std::string strNewRecv;
+        std::string strOldRecv = "Unknown Command.";
+        strNewRecv = "Targeting " + g_strCharToTarget;
+
+        sztLoc = 0;
+        for (; sztLoc < strNewRecv.length(); sztLoc++)
+        {
+            g_ucInfoTextRecv[sztLoc] = strNewRecv[sztLoc];
+        }
+        // Client might crash because ill be overwriting more characters than allocated for Unknown Command. Might have to shorten targeting text.
+        g_ucInfoTextRecv[sztLoc] = '\0';
+        //for (; sztLoc < strOldRecv.length(); sztLoc++)
+        //{
+        //    g_ucInfoTextRecv[sztLoc] = '\0';
+        //}
+    }
+}
+
+void __declspec(naked) InfoTextBoxDetour()
+{
+    __asm
+    {
+        pushad
+        pushfd
+        mov g_ucInfoTextRecv, eax
+        mov g_ucInfoTextSent, ebx
+    }
+
+    InspectInfoText();
+
+    __asm
+    {
+        popfd
+        popad
+        lea eax, ss: [ebp - 0x104]
+        jmp dwJmpInfoTextBox
+    }
+}
+
 void ToggleMobHP()
 {
     BYTE* pbyPatchAddy = (BYTE*)(g_dwFiestaBase + 0x27C7A1);
@@ -165,8 +227,8 @@ void InitializeHooks()
     //jmpBackAuth = hookAuthentication + 0x6;
 
     //lea eax, ss:[ebp-0x104]
-    //DWORD dwHookInfoTextBox = fiestaBase + 0x2C8EE7;
-    //dwJmpInfoTextBox = dwHookInfoTextBox + 0x6;
+    DWORD dwHookInfoTextBox = g_dwFiestaBase + 0x2C8EE7;
+    dwJmpInfoTextBox = dwHookInfoTextBox + 0x6;
 
     //mov edx, dword ptr ss:[ebp-0xC]
    // DWORD dwHookLoginInfo = fiestaBase + 0x114634;
@@ -181,7 +243,7 @@ void InitializeHooks()
     //{
     //    HookFunctionAddy((void*)hookAuthentication, authenticationBypass, 6);
     //}
-    //HookFunctionAddy((void*)dwHookInfoTextBox, InfoTextBoxDetour, 6);
+    HookFunctionAddy((void*)dwHookInfoTextBox, InfoTextBoxDetour, 6);
     //HookFunctionAddy((void*)dwHookLoginInfo, LoginInfoDetour, 6);
    //g_bHooksDone = true;
 }
@@ -207,6 +269,8 @@ DWORD WINAPI main(LPVOID param)
     int questPointerOffset = 0x87E84C;
     g_pdwQuestPointer = (DWORD*)(g_dwFiestaBase + questPointerOffset);
     g_pdwQuestNumberPointer = (DWORD*)(g_dwFiestaBase + (questPointerOffset - 0x8));
+
+    g_dwEntityPointer = g_dwFiestaBase + 0x85C1C8;// 0x7193F0;
 
     InitializeHooks();
 

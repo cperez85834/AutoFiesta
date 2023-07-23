@@ -348,6 +348,12 @@ DWORD WINAPI CheckQuestsThread(LPVOID param)
 			CheckQuests();
 			Sleep(100);
 		}
+		if (false == g_strCharToTarget.empty())
+		{
+			WORD dwTargetID = GetTargetIDByName(g_strCharToTarget);
+			TargetEntity(dwTargetID);
+			g_strCharToTarget.clear();
+		}
 		Sleep(100);
 	}
 

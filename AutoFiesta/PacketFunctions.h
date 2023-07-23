@@ -10,6 +10,23 @@ DWORD* g_pdwSendNormal = 0;
 DWORD* g_pdwCurrentEncryptionIndex = 0;
 WORD* g_pwCurrentEncryptionIndex = 0;
 WORD g_wCurrentEncryptionIndex = 0;
+
+//Base Pointers
+DWORD g_dwFiestaBase = 0;
+DWORD g_dwEntityPointer;
+DWORD dwEntityFirstOffset = 0x28;
+DWORD dwEntitySecondOffset = 0x8;
+DWORD dwEntityThirdOffset = 0x2C8;
+DWORD dwEntityMobIdOffset = 0x3BA;
+DWORD dwEntityMobHealthOffset = 0x288;
+DWORD dwEntityInvisibleOffset = 0x24; //also 0x44?
+DWORD dwEntityTitleOffset = 0xdc;
+DWORD dwEntityMobMaxHealthOffset = 0x290;
+DWORD dwEntityMobTargetIdOffset = 0x234;
+DWORD dwEntityMobNameOffset = 0x236;
+unsigned char playerID[2] = { 0xFF, 0xFF };
+
+std::string g_strCharToTarget;
 typedef void(__stdcall* _encryptPacketFunc)(char* buffer, int numBytes);
 _encryptPacketFunc encryptPacketFunc;
 void sendEncryptPacketFunc(SOCKET socSendSocket, char* buffer, int numBytes) {
@@ -106,4 +123,289 @@ void sendWhisper(std::string user, std::string message) {
 
 	sendCrypt(*g_pdwSendNormal, whisperPacket, packetLength + 1, 0);
 	delete whisperPacket;
+}
+
+void SendPacketInspector(BYTE* pbBuffer, BYTE* pbOriginalBuffer, int iSize)
+{
+	UNREFERENCED_PARAMETER(pbBuffer);
+	UNREFERENCED_PARAMETER(pbOriginalBuffer);
+	UNREFERENCED_PARAMETER(iSize);
+}
+
+int GetEntityList(DWORD dwEntityList[1024])
+{
+	DWORD entityName, entityID;
+
+	dwEntityList[0] = *(DWORD*)(g_dwEntityPointer + dwEntityFirstOffset);
+	if (playerID[0] == 0xFF && playerID[1] == 0xFF) {
+		DWORD player = *(DWORD*)(dwEntityList[0] + dwEntitySecondOffset);
+		playerID[0] = *(BYTE*)(player + dwEntityMobTargetIdOffset);
+		playerID[1] = *(BYTE*)(player + dwEntityMobTargetIdOffset + 1);
+	}
+
+	int entityCounter = 1;
+	int i = 0;
+	bool unique = true;
+	while (1) {
+		if (*(DWORD*)dwEntityList[i] != 0) {
+			// Checks if already in list
+			for (int j = 0; dwEntityList[j] != 0; j++) {
+				if (*(DWORD*)dwEntityList[j] == dwEntityList[j]) {
+					unique = false;
+					break;
+				}
+			}
+
+			// If unique, store it
+			if (unique == true) {
+				dwEntityList[entityCounter] = *(DWORD*)dwEntityList[i];
+				entityCounter++;
+			}
+		}
+
+		i++;
+		if (dwEntityList[i] == 0) break;
+		unique = true;
+	}
+
+	return entityCounter;
+}
+void TargetEntityList(int IDs[20], int optionalIDs[20], DWORD dwEntityList[1024], bool bKillAreaOverride = false, bool bIgnoreHP = false, bool bBoolSkipTarget = false)
+{
+	//char* carrTargetPacket = new char[5];
+	DWORD dwEntityBase = 0;
+	for (int i = 0; dwEntityList[i] != 0 && i < 1024; i++) {
+
+		if (isMemReadable((LPCVOID)(dwEntityList[i] + dwEntitySecondOffset), sizeof(DWORD))) dwEntityBase = *(DWORD*)(dwEntityList[i] + dwEntitySecondOffset);
+		else continue;
+
+		WORD wEntityMobID = 0;
+		if (isMemReadable((LPCVOID)(dwEntityBase + dwEntityMobIdOffset), sizeof(WORD))) wEntityMobID = *(WORD*)(dwEntityBase + dwEntityMobIdOffset);
+		else continue;
+
+		int iEntityHealth = 0;
+		if (isMemReadable((LPCVOID)(dwEntityBase + dwEntityMobHealthOffset), sizeof(int))) iEntityHealth = *(int*)(dwEntityBase + dwEntityMobHealthOffset);
+		else continue;
+
+
+		//if (bKillAreaOverride == false)
+		//{
+		//	// checks if mob is within kill radius before targetting
+		//	DWORD* dwEntityDeref = (DWORD*)(dwEntityBase + dwEntityThirdOffset);
+		//	if (dwEntityBase == 0) continue;
+		//	//cout << "bap5" << endl;
+		//	DWORD dwEntityDetails = 0;
+		//	if (isMemReadable((LPCVOID)dwEntityDeref, sizeof(DWORD))) dwEntityDetails = *(DWORD*)dwEntityDeref;
+		//	else continue;
+		//	//cout << "bap6" << endl;
+		//	if (dwEntityDetails < g_dwFiestaBase) {
+		//		//i++;
+		//		continue;
+		//	}
+		//	float currentEntityX = 0;
+		//	float currentEntityY = 0;
+		//	if (isMemReadable((LPCVOID)(dwEntityDetails + 0x58), sizeof(float))) currentEntityX = *(float*)(dwEntityDetails + 0x58);
+		//	else continue;
+		//	if (isMemReadable((LPCVOID)(dwEntityDetails + 0x5C), sizeof(float))) currentEntityY = *(float*)(dwEntityDetails + 0x5C);
+		//	else continue;
+
+		//	//cout << "bap7" << endl;
+		//	if (distanceFunc(
+		//		(poiTargetCoords == nullptr) ? initialX : poiTargetCoords->x,
+		//		(poiTargetCoords == nullptr) ? initialY : poiTargetCoords->y,
+		//		currentEntityX,
+		//		currentEntityY) > killRadius) {
+		//		//cout << "Entity " << barrSelectionID << " too far" << endl;
+		//		dwEntityList[i] = -1;
+		//		continue;
+		//	}
+		//}
+
+		//cout << "bap5" << endl;
+		bool found = false;
+		for (int j = 0; j < 20 && IDs[j] != 0; j++) {
+			if (wEntityMobID == IDs[j]) {
+				found = true;
+				break;
+			}
+		}
+		//cout << "bap6" << endl;
+		if (found == false) {
+			for (int j = 0; j < 20 && optionalIDs[j] != 0; j++) {
+				if (wEntityMobID == optionalIDs[j]) {
+					found = true;
+					break;
+				}
+			}
+		}
+		//cout << "bap7" << endl;
+		// Don't need to target in this GUI version
+		//if (found == true) 
+		//{
+		//	if ((iEntityHealth == 0 || bIgnoreHP == true) && bBoolSkipTarget == false) {
+		//		carrTargetPacket[0] = 0x04;
+		//		carrTargetPacket[1] = 0x01;
+		//		carrTargetPacket[2] = 0x24;
+		//		carrTargetPacket[3] = *(BYTE*)(dwEntityBase + dwEntityMobTargetIdOffset);
+		//		carrTargetPacket[4] = *(BYTE*)(dwEntityBase + dwEntityMobTargetIdOffset + 1);
+
+		//		sendCrypt(*g_pdwSendNormal, carrTargetPacket, 5, 0);
+		//		//getchar();
+		//		Sleep(10);
+		//	}
+		//}
+		//cout << "bap8" << endl;
+	}
+	//Sleep(1000);
+	//delete carrTargetPacket;
+}
+
+WORD GetTargetIDByName(std::string strNameWanted, POINT* poiTarget = nullptr, bool bCheckInvis = false)
+{
+	int ids[20] = { 0 };
+	int optionalIDs[20] = { 0 };
+	ids[0] = 0xFFFF;
+	DWORD entities[1024] = { 0 };
+	int iEntityCounter = GetEntityList(entities);
+	//cout << "Starting targetID by name" << endl;
+	//TargetEntityList(ids, optionalIDs, entities, false, true, true);
+
+	//cout << "Number of Entities: " << iEntityCounter << endl;
+	Sleep(200);
+	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
+	//DWORD entityHealth = 0;	
+	for (int i = 0; entities[i] != 0; i++)
+	{
+		if (entities[i] == -1) continue;
+		WORD membuf = 0;
+		float coordbuff = 0;
+		//cout << "sup ";
+		//cout << hex << "entities[i]: " << entities[i] << endl;
+		//cout << "Getting Base: " << (DWORD*)(entities[i] + 0x08) << endl;
+
+		DWORD entityBase = 0;
+		//cout << "umm1" << endl;
+		if (isMemReadable((LPCVOID)(entities[i] + dwEntitySecondOffset), sizeof(DWORD))) entityBase = *(DWORD*)(entities[i] + dwEntitySecondOffset);
+		else continue;
+		BYTE byIsInvisible = 0;
+		if (isMemReadable((LPCVOID)(entityBase + 0x24), sizeof(BYTE), (void*)&byIsInvisible));
+
+		//cout << "ummb" << endl;
+
+		WORD currentMobID = 0;
+		if (isMemReadable((LPCVOID)(entityBase + dwEntityMobIdOffset), sizeof(WORD))) currentMobID = *(WORD*)(entityBase + dwEntityMobIdOffset);
+		else continue;
+
+		bool foundMob = false;
+		for (int j = 0; j < 1; j++) {
+			if (ids[j] > 0) {
+				if (currentMobID == ids[j]) {
+					foundMob = true;
+					break;
+				}
+			}
+		}
+
+		BYTE byTitleFirstByte = 0xFF;
+		if (isMemReadable((LPCVOID)(entityBase + dwEntityTitleOffset), sizeof(BYTE))) byTitleFirstByte = *(BYTE*)(entityBase + dwEntityTitleOffset);
+		else continue;
+
+		//Check the title of entity. 0x00 means its a mount
+		if (byTitleFirstByte == 0x00)
+		{
+			continue;
+		}
+
+
+		//cout << "ugh sucky" << endl;
+		if (foundMob == false) continue;
+		//cout << "umm5" << endl;
+		//cout << "wtf now dude" << endl;
+		//cout << hex << "currentMobID: " << currentMobID << endl;
+
+		//cout << "Getting Details" << endl;
+		DWORD* entityDeref = (DWORD*)(entityBase + dwEntityThirdOffset);
+		if (entityDeref == 0) continue;
+
+		/*		BYTE entityDetails1 = static_cast<unsigned>(*(BYTE*)entityDeref);
+		cout << "1: " << entityDetails1 << endl;
+		BYTE entityDetails2 = static_cast<unsigned>(*(BYTE*)(entityDeref + 1));
+		cout << "2: " << entityDetails2 << endl;
+		BYTE entityDetails3 = static_cast<unsigned>(*(BYTE*)(entityDeref + 2));
+		cout << "3: " << entityDetails3 << endl;
+		BYTE entityDetails4 = static_cast<unsigned>(*(BYTE*)(entityDeref + 3));
+		cout << "4: " << entityDetails4 << endl;*/
+		DWORD entityDetails = 0;
+		if (isMemReadable((LPCVOID)entityDeref, sizeof(DWORD))) entityDetails = *(DWORD*)entityDeref;
+
+		//DWORD entityDetails = *(DWORD*)entityDeref;
+		//cout << hex << "entities[i]: " << entities[i] << endl;
+		//cout << hex << "entityBase: " << entityBase << endl;
+		//cout << hex << "entityDetails: " << entityDetails << endl;
+		/*if (entityDetails < fiestaBase || entityDetails > 0x7f000000 || entityDetails < 0x10000000){
+		//i++;
+		continue;
+		}*/
+		if (entityDetails < g_dwFiestaBase) {
+			//i++;
+			continue;
+		}
+
+		//cout << "umm3" << endl;
+		//cout << "umma" << endl;
+		WORD currentSelectionId = *(WORD*)(entityBase + dwEntityMobTargetIdOffset);
+		//cout << hex << "currentSelectionId: " << *(WORD*)(entityBase + 0x234 + ENTITY_OFFSET) << endl;
+		//if (*(WORD*)(entityBase + 0x238) == 0) continue;
+		////////////////////////////////////////////////////
+		int* entityHealth = (int*)(entityBase + dwEntityMobHealthOffset);
+		int* entityMaxHealth = (int*)(entityBase + dwEntityMobMaxHealthOffset);
+		std::string strNameFound = reinterpret_cast<char*>((entityBase + dwEntityMobNameOffset));
+
+		float* currentEntityX = (float*)(entityDetails + 0x58);
+		float* currentEntityY = (float*)(entityDetails + 0x5C);
+
+		if (currentEntityX == NULL || currentEntityY == NULL) continue;
+
+
+		//float distToPlayer = sqrt(pow((*(playerX)-*currentEntityX), 2) + pow((*(playerY)-*currentEntityY), 2));
+		//cout << "umm1" << endl;
+		//distToCenter is the distance to a center point around which the player should kill. Anything greater than a distance of whatever won't be targetted
+		//float distToCenter = sqrt(pow((initialX - *currentEntityX), 2) + pow((initialY - *currentEntityY), 2));
+		//cout << "umm2" << endl;
+
+
+		if (foundMob == true)
+		{
+			//if (distToPlayer >= killRadius) continue;
+			if (strNameFound.size() > 40) continue;
+			//cout << "Found name: " << strNameFound << "\tExpecting: " << strNameWanted << endl;
+			if (strNameFound.compare(strNameWanted) == 0)
+			{
+				//cout << hex << "Distance to player: " << distToPlayer << endl;
+				if (poiTarget != nullptr)
+				{
+					poiTarget->x = *currentEntityX;
+					poiTarget->y = *currentEntityY;
+					//cout << "X target: " << poiTarget->x << "\tY target: " << poiTarget->y << endl;
+				}
+				CloseHandle(hProcess);
+				//cout << "Target ID: " << currentSelectionId << endl;
+				return currentSelectionId;
+			}
+
+		}
+
+	}
+	//cout << "lollers" << endl;
+	CloseHandle(hProcess);
+	//cout << "lol 1\n";
+	return 0xFFFF;
+}
+
+void TargetEntity(WORD wEntityTargetID)
+{
+	char target[] = { 0x04, 0x01, 0x24, 0, 0 };
+	*reinterpret_cast<WORD*>(target + 3) = wEntityTargetID;
+
+	sendCrypt(*g_pdwSendNormal, target, sizeof(target), 0);
 }
