@@ -133,33 +133,36 @@ void InspectInfoText()
     //cout << "Message found: " << strInfoText << endl;
     strInfoTextSent.resize(0x20, '\0');
     size_t sztLoc = strInfoTextSent.find("/target ");
-    if (sztLoc != std::string::npos)
+    if (strInfoTextRecv.find("Unknown") != std::string::npos)
     {
-        sztLoc += 8;
-        size_t sztNameLength = 0;
-        while (strInfoTextSent[sztLoc] != '\0')
+        if (sztLoc != std::string::npos)
         {
-            sztNameLength++;
-            sztLoc++;
-        }
-        g_strCharToTarget.clear();
-        g_strCharToTarget = strInfoTextSent.substr(sztLoc - sztNameLength, sztNameLength);
+            sztLoc += 8;
+                size_t sztNameLength = 0;
+                while (strInfoTextSent[sztLoc] != '\0')
+                {
+                    sztNameLength++;
+                        sztLoc++;
+                }
+            g_strCharToTarget.clear();
+            g_strCharToTarget = strInfoTextSent.substr(sztLoc - sztNameLength, sztNameLength);
 
-        std::string strNewRecv;
-        std::string strOldRecv = "Unknown Command.";
-        strNewRecv = "Targeting " + g_strCharToTarget;
+            std::string strNewRecv;
+            std::string strOldRecv = "Unknown Command.";
+            strNewRecv = "Targeting " + g_strCharToTarget;
 
-        sztLoc = 0;
-        for (; sztLoc < strNewRecv.length(); sztLoc++)
-        {
-            g_ucInfoTextRecv[sztLoc] = strNewRecv[sztLoc];
+            sztLoc = 0;
+            for (; sztLoc < strNewRecv.length(); sztLoc++)
+            {
+                g_ucInfoTextRecv[sztLoc] = strNewRecv[sztLoc];
+            }
+            // Client might crash because ill be overwriting more characters than allocated for Unknown Command. Might have to shorten targeting text.
+            g_ucInfoTextRecv[sztLoc] = '\0';
+            //for (; sztLoc < strOldRecv.length(); sztLoc++)
+            //{
+            //    g_ucInfoTextRecv[sztLoc] = '\0';
+            //}
         }
-        // Client might crash because ill be overwriting more characters than allocated for Unknown Command. Might have to shorten targeting text.
-        g_ucInfoTextRecv[sztLoc] = '\0';
-        //for (; sztLoc < strOldRecv.length(); sztLoc++)
-        //{
-        //    g_ucInfoTextRecv[sztLoc] = '\0';
-        //}
     }
 }
 
