@@ -128,13 +128,19 @@ void __declspec(naked) UnlockEncryption() {
 void InspectInfoText()
 {
     std::string strInfoTextRecv(g_ucInfoTextRecv);
-    std::string strInfoTextSent(g_ucInfoTextSent);
+
 
     //cout << "Message found: " << strInfoText << endl;
-    strInfoTextSent.resize(0x20, '\0');
-    size_t sztLoc = strInfoTextSent.find("/target ");
-    if (strInfoTextRecv.find("Unknown") != std::string::npos)
+
+
+    if (strInfoTextRecv.find("Unknown command") != std::string::npos)
     {
+        if (isMemReadable(g_ucInfoTextSent, 1) == false) return;
+
+        std::string strInfoTextSent(g_ucInfoTextSent);
+        strInfoTextSent.resize(0x20, '\0');
+        size_t sztLoc = strInfoTextSent.find("/target ");
+
         if (sztLoc != std::string::npos)
         {
             sztLoc += 8;
@@ -148,7 +154,7 @@ void InspectInfoText()
             g_strCharToTarget = strInfoTextSent.substr(sztLoc - sztNameLength, sztNameLength);
 
             std::string strNewRecv;
-            std::string strOldRecv = "Unknown Command.";
+            std::string strOldRecv = "Unknown command.";
             strNewRecv = "Targeting " + g_strCharToTarget;
 
             sztLoc = 0;
