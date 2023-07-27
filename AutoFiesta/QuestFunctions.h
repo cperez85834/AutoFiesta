@@ -342,7 +342,6 @@ DWORD WINAPI CheckQuestsThread(LPVOID param)
 {
 	while (1)
 	{
-		SetWindowText((HWND)param, std::to_wstring(*g_pdwSendNormal).c_str());
 		while (IsDlgButtonChecked((HWND)param, 1))
 		{
 			CheckQuests();
@@ -351,10 +350,52 @@ DWORD WINAPI CheckQuestsThread(LPVOID param)
 		if (false == g_strCharToTarget.empty())
 		{
 			WORD dwTargetID = GetTargetIDByName(g_strCharToTarget);
-			TargetEntity(dwTargetID);
+			if (0xFFFF == dwTargetID)
+			{
+				SetWindowText((HWND)param, L"Not found!");
+			}
+			else
+			{
+				SetWindowText((HWND)param, L"Found!");
+				TargetEntity(dwTargetID);
+			}
 			g_strCharToTarget.clear();
 		}
-		Sleep(100);
+		if (true == g_bStartLHBot)
+		{
+			if (*g_pdwLHCoins < 1000)
+			{
+				MessageBox(g_hwndMain, L"Not enough coins!", L"Doh!", MB_OK);
+			}
+			else if (*g_pdwLHCoins < 5000 && g_wCapsuleIndex == CapsuleIDs::Red2)
+			{
+				MessageBox(g_hwndMain, L"Not enough coins!", L"Doh!", MB_OK);
+			}
+			else
+			{
+				for (auto ButtonID : g_vecLHButtons)
+				{
+					EnableWindow(GetDlgItem(g_hwndMain, ButtonID), false);
+				}
+				for (auto ButtonID : g_vecMainButtons)
+				{
+					EnableWindow(GetDlgItem(g_hwndMain, ButtonID), false);
+				}
+				EnableWindow(GetDlgItem(g_hwndMain, RBTN_LH), false);
+				EnableWindow(GetDlgItem(g_hwndMain, RBTN_MAIN), false);
+				AutoLH();
+				for (auto ButtonID : g_vecLHButtons)
+				{
+					EnableWindow(GetDlgItem(g_hwndMain, ButtonID), true);
+				}
+				EnableWindow(GetDlgItem(g_hwndMain, RBTN_LH), true);
+				EnableWindow(GetDlgItem(g_hwndMain, RBTN_MAIN), true);
+			}
+
+			g_bStartLHBot = false;
+			SetWindowText(g_hwndLHRBTN, L"Start LH Bot");
+		}
+		Sleep(10);
 	}
 
 	return 0;

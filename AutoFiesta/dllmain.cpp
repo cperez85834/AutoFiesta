@@ -35,18 +35,22 @@ char* g_ucInfoTextSent;
 
 //Hook stuff
 DWORD dwJmpBackSendLogger;
+DWORD dwJmpBackZoomHook;
 DWORD jmpBackAuth;
 DWORD jmpBackAddyMove;
 DWORD dwJmpSendLock;
 DWORD dwJmpTargetBuff;
 DWORD dwJmpSendUnlock;
 DWORD dwJmpInfoTextBox;
+DWORD dwJmpBackRecvLogger;
 DWORD jmpBackAddyDrops;
 DWORD jmpBackPacketQueue;
 DWORD jmpBackPacketSent;
 DWORD dwJmpLoginInfo;
 DWORD dwJmpBackPrelogin;
 
+//Zoom
+float g_fZoomLimit = 700;
 bool HookFunctionAddy(void* toHook, void* ourFunct, int len)
 {
     if (len < 5) {
@@ -124,7 +128,24 @@ void __declspec(naked) UnlockEncryption() {
         //jmp dwJmpSendUnlock
     }
 }
-
+void __declspec(naked) ZoomHook()
+{
+    __asm
+    {
+        pushad
+        pushfd
+    }
+    g_fZoomLimit = 700;
+    __asm
+    {
+        movss xmm2, g_fZoomLimit
+        popfd
+        popad
+        movaps xmm0, xmm1
+        comiss xmm1,xmm2
+        jmp dwJmpBackZoomHook
+    }
+}
 void InspectInfoText()
 {
     std::string strInfoTextRecv(g_ucInfoTextRecv);
@@ -141,34 +162,45 @@ void InspectInfoText()
         strInfoTextSent.resize(0x20, '\0');
         size_t sztLoc = strInfoTextSent.find("/target ");
 
-        if (sztLoc != std::string::npos)
+        if (sztLoc == std::string::npos)
+        {
+            sztLoc = strInfoTextSent.find("/tar ");
+            if (sztLoc == std::string::npos)
+            {
+                return;
+            }
+            sztLoc += 5;
+        }
+        else
         {
             sztLoc += 8;
-                size_t sztNameLength = 0;
-                while (strInfoTextSent[sztLoc] != '\0')
-                {
-                    sztNameLength++;
-                        sztLoc++;
-                }
-            g_strCharToTarget.clear();
-            g_strCharToTarget = strInfoTextSent.substr(sztLoc - sztNameLength, sztNameLength);
-
-            std::string strNewRecv;
-            std::string strOldRecv = "Unknown command.";
-            strNewRecv = "Targeting " + g_strCharToTarget;
-
-            sztLoc = 0;
-            for (; sztLoc < strNewRecv.length(); sztLoc++)
-            {
-                g_ucInfoTextRecv[sztLoc] = strNewRecv[sztLoc];
-            }
-            // Client might crash because ill be overwriting more characters than allocated for Unknown Command. Might have to shorten targeting text.
-            g_ucInfoTextRecv[sztLoc] = '\0';
-            //for (; sztLoc < strOldRecv.length(); sztLoc++)
-            //{
-            //    g_ucInfoTextRecv[sztLoc] = '\0';
-            //}
         }
+
+        size_t sztNameLength = 0;
+        while (strInfoTextSent[sztLoc] != '\0')
+        {
+            sztNameLength++;
+            sztLoc++;
+        }
+        g_strCharToTarget.clear();
+        g_strCharToTarget = strInfoTextSent.substr(sztLoc - sztNameLength, sztNameLength);
+
+        std::string strNewRecv;
+        std::string strOldRecv = "Unknown command.";
+        strNewRecv = "Targeting " + g_strCharToTarget;
+
+        sztLoc = 0;
+        for (; sztLoc < strNewRecv.length(); sztLoc++)
+        {
+            g_ucInfoTextRecv[sztLoc] = strNewRecv[sztLoc];
+        }
+        // Client might crash because ill be overwriting more characters than allocated for Unknown Command. Might have to shorten targeting text.
+        g_ucInfoTextRecv[sztLoc] = '\0';
+        //for (; sztLoc < strOldRecv.length(); sztLoc++)
+        //{
+        //    g_ucInfoTextRecv[sztLoc] = '\0';
+        //}
+
     }
 }
 
@@ -193,6 +225,60 @@ void __declspec(naked) InfoTextBoxDetour()
     }
 }
 
+#pragma optimize( "", off )
+void RecvPacketInspector(BYTE* pbBuffer, int iSize, BYTE* pbRealBuffer)
+{
+    //capsule was in slot 0, slot 1 was empty
+    //capsule = 0xe2cf, result is eld scroll = 0x09ca
+
+    //1a 01 30 00 24 00 24 ff ff 09 01 30 01 24 01 24 ..0.$.$ÿÿ..0.$.$
+    //ca 09 01 07 16 30 00 07 cf e2 09 Ê  0 Ïâ
+
+    for (int j = 0; j < iSize; j++)
+    {
+        if (pbBuffer[j] == 0x01)
+        {
+            if (j + 25 > iSize) break;
+            // 0xe2cf is blue capsule 1
+            if (pbBuffer[j + 1] == 0x30 && *(WORD*)(&pbBuffer[j + 6]) == 0xFFFF && *(WORD*)(&pbBuffer[j + 23]) == g_warrCapsuleIDs[g_wCapsuleIndex])
+            {
+                // We probably opened a capsule
+                g_wCapsuleItem = *(WORD*)(&pbBuffer[j + 15]);
+                break;
+            }
+        }
+    }
+}
+#pragma optimize( "", on )
+
+void __declspec(naked) RecvPacketLogger()
+{
+    pbRecvPacketBuffer = nullptr;
+    iRecvBufferSize = 0;
+    g_dwCurrentRecvingSocket = 0;
+    __asm
+    {
+        pushad
+        pushfd
+        mov eax, dword ptr ds : [ebp - 8]
+        mov iRecvBufferSize, eax
+        mov eax, dword ptr ds : [ebp - 4]
+        lea ebx, dword ptr ds : [eax + 0x800C]
+        mov pbRecvPacketBuffer, ebx
+        mov eax, dword ptr ds : [eax + 4]
+        mov g_dwCurrentRecvingSocket, eax
+    }
+    memcpy(ucRecvPacket, pbRecvPacketBuffer, iRecvBufferSize);
+    RecvPacketInspector(ucRecvPacket, iRecvBufferSize, pbRecvPacketBuffer);
+
+    __asm
+    {
+        popfd
+        popad
+        mov ecx, dword ptr ds : [eax + 0x1000C]
+        jmp[dwJmpBackRecvLogger]
+    }
+}
 void ToggleMobHP()
 {
     BYTE* pbyPatchAddy = (BYTE*)(g_dwFiestaBase + 0x27C7A1);
@@ -230,6 +316,16 @@ void InitializeHooks()
     DWORD dwHookPreEncryption = g_dwFiestaBase + 0x4A196D; //encryption hook, preRNG function done
     dwJmpBackSendLogger = dwHookPreEncryption + 0xA;
 
+    //movaps xmm0,xmm1
+    //comiss xmm1,xmm2
+    //jna 0025300B
+    DWORD dwHookZoom = g_dwFiestaBase + 0x52FFB; //encryption hook, preRNG function done
+    dwJmpBackZoomHook = dwHookZoom + 0x6;
+
+    //mov ecx, dword ptr ds:[eax+0x1000C]
+    DWORD dwHookRecv = g_dwFiestaBase + 0x440B9E;
+    dwJmpBackRecvLogger = dwHookRecv + 0x6;
+
     //lea eax,dword ptr ss:[ebp-114]
     //AOB: 8D85E8FDFFFF508D8D Look for GetModuleFileNameA calls
     //DWORD hookAuthentication = fiestaBase + 0x113BAE; // done
@@ -243,10 +339,11 @@ void InitializeHooks()
    // DWORD dwHookLoginInfo = fiestaBase + 0x114634;
     //dwJmpLoginInfo = dwHookLoginInfo + 0x6;
 
-    //HookFunctionAddy((void*)dwHookRecv, RecvPacketLogger, 6);
+    HookFunctionAddy((void*)dwHookRecv, RecvPacketLogger, 6);
     ////HookFunctionAddy((void*)dwTargetBuff, BuffInspector, 6);
     //HookFunctionAddy((void*)dwHookPreEncryption, SendPacketLogger, 10);
     HookFunctionAddy((void*)dwLockEncryption, LockEncryption, 6);
+    HookFunctionAddy((void*)dwHookZoom, ZoomHook, 6);
     HookFunctionAddy((void*)dwUnlockEncryption, UnlockEncryption, 7);
     //if (g_bDistributed == false)
     //{
@@ -280,6 +377,8 @@ DWORD WINAPI main(LPVOID param)
     g_pdwQuestNumberPointer = (DWORD*)(g_dwFiestaBase + (questPointerOffset - 0x8));
 
     g_dwEntityPointer = g_dwFiestaBase + 0x85C1C8;// 0x7193F0;
+    g_dwCurrentWindow = g_dwFiestaBase + 0x882630;
+    g_pdwLHCoins = (DWORD*)(g_dwFiestaBase + 0x785620);
 
     InitializeHooks();
 
@@ -292,46 +391,251 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
     case WM_CREATE:
     {
+        g_hwndMainRBTN = CreateWindow(L"button", L"Main Functions",
+            WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON,
+            20, 20, 185, 35,
+            hwnd, (HMENU)RBTN_MAIN, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
         CreateWindow(L"button", L"Auto Turn-in",
             WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
-            20, 20, 185, 35,
-            hwnd, (HMENU)1, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+            20, 50, 185, 35,
+            hwnd, (HMENU)DLG_AUTOTI, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
         CreateWindow(L"button", L"Mob HP",
             WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
-            20, 55, 185, 35,
-            hwnd, (HMENU)2, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+            20, 85, 185, 35,
+            hwnd, (HMENU)DLG_MOBHP, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        g_hwndLHRBTN = CreateWindow(L"button", L"LH Bot",
+            WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON,
+            20, 115, 185, 35,
+            hwnd, (HMENU)RBTN_LH, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+        CreateWindow(L"button", L"Red 1",
+            WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON,
+            20, 145, 80, 35,
+            hwnd, (HMENU)RBTN_LHRED1, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        CreateWindow(L"button", L"Red 2",
+            WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON,
+            100, 145, 80, 35,
+            hwnd, (HMENU)RBTN_LHRED2, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        CreateWindow(L"button", L"Blue 1",
+            WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON,
+            180, 145, 80, 35,
+            hwnd, (HMENU)RBTN_LHBLUE1, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        CreateWindow(L"button", L"Blue 2",
+            WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON,
+            260, 145, 80, 35,
+            hwnd, (HMENU)RBTN_LHBLUE2, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        g_hwndComboBags = CreateWindow(L"combobox", L"Number of Bags",
+            CBS_DROPDOWN | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE,
+            340, 145, 80, 200,
+            hwnd, (HMENU)CBX_LHBAGS, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+        CreateWindow(L"button", L"Save T3/T4/T5 HP",
+            WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
+            20, 175, 160, 35,
+            hwnd, (HMENU)DLG_SAVEHPPOTS, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        CreateWindow(L"button", L"Save T3/T4/T5 SP",
+            WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
+            180, 175, 160, 35,
+            hwnd, (HMENU)DLG_SAVESPPOTS, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+        CreateWindow(L"button", L"Start LH Bot",
+            WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+            20, 215, 80, 35,
+            hwnd, (HMENU)BTN_STARTLH, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        for (int i = 0; i < 7; i++)
+        {
+            SendMessageW(
+                g_hwndComboBags,
+                (UINT)CB_ADDSTRING,
+                (WPARAM)0, (LPARAM)g_wchBags[i]);
+        }
         CreateThread(0, 0, CheckQuestsThread, hwnd, 0, 0);
+        //CheckDlgButton(hwnd, RBTN_MAIN, BST_CHECKED);
+        SendMessage(g_hwndMainRBTN, BM_CLICK, (WPARAM)0, (LPARAM)0);
+        CheckDlgButton(hwnd, RBTN_LHRED1, BST_CHECKED);
+        SendMessage(g_hwndComboBags, CB_SETCURSEL, (WPARAM)0, (LPARAM)0);
+
         break;
     }
     case WM_COMMAND:
     {
         switch (LOWORD(wParam))
         {
-        case 1:
+        case DLG_AUTOTI:
         {
-            BOOL checked = IsDlgButtonChecked(hwnd, 1);
+            BOOL checked = IsDlgButtonChecked(hwnd, DLG_AUTOTI);
             if (checked) {
-                CheckDlgButton(hwnd, 1, BST_UNCHECKED);
+                CheckDlgButton(hwnd, DLG_AUTOTI, BST_UNCHECKED);
                 g_bAutoTurnIn = false;
-                SetWindowText(hwnd, L"Not Checked");
             }
             else {
-                CheckDlgButton(hwnd, 1, BST_CHECKED);
+                CheckDlgButton(hwnd, DLG_AUTOTI, BST_CHECKED);
                 g_bAutoTurnIn = true;
-                SetWindowText(hwnd, L"Checked");
             }
             break;
         }
-        case 2:
+        case DLG_MOBHP:
         {
-            BOOL checked = IsDlgButtonChecked(hwnd, 2);
+            BOOL checked = IsDlgButtonChecked(hwnd, DLG_MOBHP);
             if (checked) {
-                CheckDlgButton(hwnd, 2, BST_UNCHECKED);
+                CheckDlgButton(hwnd, DLG_MOBHP, BST_UNCHECKED);
                 ToggleMobHP();
             }
             else {
-                CheckDlgButton(hwnd, 2, BST_CHECKED);
+                CheckDlgButton(hwnd, DLG_MOBHP, BST_CHECKED);
                 ToggleMobHP();
+            }
+            break;
+        }
+        case DLG_SAVEHPPOTS:
+        {
+            if (true == IsDlgButtonChecked(hwnd, DLG_SAVEHPPOTS))
+            {
+                CheckDlgButton(hwnd, DLG_SAVEHPPOTS, BST_UNCHECKED);
+            }
+            else
+            {
+                CheckDlgButton(hwnd, DLG_SAVEHPPOTS, BST_CHECKED);
+            }
+            break;
+        }
+        case DLG_SAVESPPOTS:
+        {
+            if (true == IsDlgButtonChecked(hwnd, DLG_SAVESPPOTS))
+            {
+                CheckDlgButton(hwnd, DLG_SAVESPPOTS, BST_UNCHECKED);
+            }
+            else
+            {
+                CheckDlgButton(hwnd, DLG_SAVESPPOTS, BST_CHECKED);
+            }
+            break;
+        }
+        case RBTN_MAIN:
+        {
+            if (true == IsDlgButtonChecked(hwnd, RBTN_MAIN))
+            {
+                //CheckDlgButton(hwnd, RBTN_MAIN, BST_UNCHECKED);
+            }
+            else
+            {
+                CheckDlgButton(hwnd, RBTN_MAIN, BST_CHECKED);
+                CheckDlgButton(hwnd, RBTN_LH, BST_UNCHECKED);
+
+                // Enable main buttons
+                for (auto ButtonID : g_vecMainButtons)
+                {
+                    EnableWindow(GetDlgItem(hwnd, ButtonID), true);
+                }
+
+                // Disable LH buttons
+                for (auto ButtonID : g_vecLHButtons)
+                {
+                    EnableWindow(GetDlgItem(hwnd, ButtonID), false);
+                }
+            }
+            break;
+        }
+        case RBTN_LH:
+        {
+            if (true == IsDlgButtonChecked(hwnd, RBTN_LH))
+            {
+                //CheckDlgButton(hwnd, RBTN_LH, BST_UNCHECKED);
+            }
+            else
+            {
+                CheckDlgButton(hwnd, RBTN_LH, BST_CHECKED);
+                CheckDlgButton(hwnd, RBTN_MAIN, BST_UNCHECKED);
+                // Disable main buttons
+                for (auto ButtonID : g_vecMainButtons)
+                {
+                    EnableWindow(GetDlgItem(hwnd, ButtonID), false);
+                }
+
+                // Enable LH buttons
+                for (auto ButtonID : g_vecLHButtons)
+                {
+                    EnableWindow(GetDlgItem(hwnd, ButtonID), true);
+                }
+
+                if (true == IsDlgButtonChecked(hwnd, DLG_AUTOTI))
+                {
+                    CheckDlgButton(hwnd, DLG_AUTOTI, BST_UNCHECKED);
+                }
+                g_bAutoTurnIn = false;
+            }
+            break;
+        }
+
+        case RBTN_LHRED1:
+        {
+            if (true == IsDlgButtonChecked(hwnd, RBTN_LHRED1))
+            {
+                //CheckDlgButton(hwnd, RBTN_LH, BST_UNCHECKED);
+            }
+            else
+            {
+                CheckDlgButton(hwnd, RBTN_LHRED1, BST_CHECKED);
+                CheckDlgButton(hwnd, RBTN_LHRED2, BST_UNCHECKED);
+                CheckDlgButton(hwnd, RBTN_LHBLUE1, BST_UNCHECKED);
+                CheckDlgButton(hwnd, RBTN_LHBLUE2, BST_UNCHECKED);
+                g_wCapsuleIndex = CapsuleIDs::Red1;
+            }
+            break;
+        }
+        case RBTN_LHRED2:
+        {
+            if (true == IsDlgButtonChecked(hwnd, RBTN_LHRED2))
+            {
+                //CheckDlgButton(hwnd, RBTN_LH, BST_UNCHECKED);
+            }
+            else
+            {
+                CheckDlgButton(hwnd, RBTN_LHRED1, BST_UNCHECKED);
+                CheckDlgButton(hwnd, RBTN_LHRED2, BST_CHECKED);
+                CheckDlgButton(hwnd, RBTN_LHBLUE1, BST_UNCHECKED);
+                CheckDlgButton(hwnd, RBTN_LHBLUE2, BST_UNCHECKED);
+                g_wCapsuleIndex = CapsuleIDs::Red2;
+            }
+            break;
+        }
+        case RBTN_LHBLUE1:
+        {
+            if (true == IsDlgButtonChecked(hwnd, RBTN_LHBLUE1))
+            {
+                //CheckDlgButton(hwnd, RBTN_LH, BST_UNCHECKED);
+            }
+            else
+            {
+                CheckDlgButton(hwnd, RBTN_LHRED1, BST_UNCHECKED);
+                CheckDlgButton(hwnd, RBTN_LHRED2, BST_UNCHECKED);
+                CheckDlgButton(hwnd, RBTN_LHBLUE1, BST_CHECKED);
+                CheckDlgButton(hwnd, RBTN_LHBLUE2, BST_UNCHECKED);
+                g_wCapsuleIndex = CapsuleIDs::Blue1;
+            }
+            break;
+        }
+        case RBTN_LHBLUE2:
+        {
+            if (true == IsDlgButtonChecked(hwnd, RBTN_LHBLUE2))
+            {
+                //CheckDlgButton(hwnd, RBTN_LH, BST_UNCHECKED);
+            }
+            else
+            {
+                CheckDlgButton(hwnd, RBTN_LHRED1, BST_UNCHECKED);
+                CheckDlgButton(hwnd, RBTN_LHRED2, BST_UNCHECKED);
+                CheckDlgButton(hwnd, RBTN_LHBLUE1, BST_UNCHECKED);
+                CheckDlgButton(hwnd, RBTN_LHBLUE2, BST_CHECKED);
+                g_wCapsuleIndex = CapsuleIDs::Blue2;
+            }
+            break;
+        }
+        case BTN_STARTLH:
+        {
+            if (HIWORD(wParam) == BN_CLICKED)
+            {
+                g_bStartLHBot ^= 1; //toggle it on or off
             }
             break;
         }
@@ -343,6 +647,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_CLOSE:
         g_bAutoTurnIn = false;
         DestroyWindow(hwnd);
+        ExitProcess(0);
         break;
     case WM_DESTROY:
         g_bAutoTurnIn = false;
@@ -358,7 +663,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     LPSTR lpCmdLine, int nCmdShow)
 {
     WNDCLASSEX wc;
-    HWND hwnd;
     MSG Msg;
 
     //Step 1: Registering the Window Class
@@ -370,7 +674,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     wc.hInstance = hInstance;
     wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW);
     wc.lpszMenuName = NULL;
     wc.lpszClassName = g_szClassName;
     wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
@@ -383,23 +687,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     // Step 2: Creating the Window
-    hwnd = CreateWindowEx(
+    g_hwndMain = CreateWindowEx(
         WS_EX_CLIENTEDGE,
         g_szClassName,
         L"AutoFiesta",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 240, 160,
+        CW_USEDEFAULT, CW_USEDEFAULT, 560, 780,
         NULL, NULL, hInstance, NULL);
 
-    if (hwnd == NULL)
+    if (g_hwndMain == NULL)
     {
         MessageBox(NULL, L"Window Creation Failed!", L"Error!",
             MB_ICONEXCLAMATION | MB_OK);
         return 0;
     }
 
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
+    ShowWindow(g_hwndMain, nCmdShow);
+    UpdateWindow(g_hwndMain);
 
     // Step 3: The Message Loop
     while (GetMessage(&Msg, NULL, 0, 0) > 0)

@@ -1,9 +1,13 @@
 #pragma once
 //Send stuff
 BYTE* pbSendPacketBuffer = nullptr;
-int iSendBufferSize = 0;
+BYTE* pbRecvPacketBuffer = nullptr;
+volatile int iSendBufferSize = 0;
+volatile int iRecvBufferSize = 0;
 unsigned char ucUnencryptedSendPacket[16384] = { 0 };
+unsigned char ucRecvPacket[0x100000] = { 0 };
 DWORD g_dwCurrentSendingSocket = 0;
+DWORD g_dwCurrentRecvingSocket = 0;
 
 std::atomic<bool> bLockEncryption = false;
 DWORD* g_pdwSendNormal = 0;
@@ -11,9 +15,24 @@ DWORD* g_pdwCurrentEncryptionIndex = 0;
 WORD* g_pwCurrentEncryptionIndex = 0;
 WORD g_wCurrentEncryptionIndex = 0;
 
+// LH stuff
+WORD g_wCapsuleItem = 0;
+WORD g_warrCapsuleIDs[] = { 58062, 63886, 58063, 872 };
+WORD g_wCapsuleIndex = 0;
+bool g_bStartLHBot = false;
+enum CapsuleIDs
+{
+	Red1,
+	Red2,
+	Blue1,
+	Blue2
+};
+
 //Base Pointers
 DWORD g_dwFiestaBase = 0;
 DWORD g_dwEntityPointer;
+DWORD g_dwCurrentWindow;
+DWORD* g_pdwLHCoins;
 DWORD dwEntityFirstOffset = 0x28;
 DWORD dwEntitySecondOffset = 0x8;
 DWORD dwEntityThirdOffset = 0x2C8;
@@ -408,4 +427,281 @@ void TargetEntity(WORD wEntityTargetID)
 	*reinterpret_cast<WORD*>(target + 3) = wEntityTargetID;
 
 	sendCrypt(*g_pdwSendNormal, target, sizeof(target), 0);
+}
+void UseSlot(int slot)
+{
+	char packet[5] = { 0x04, 0x15, 0x30, slot, 0x09 };
+	sendCrypt(*g_pdwSendNormal, packet, 5, 0);
+}
+void AutoSort()
+{
+	char carrAutosort[] = { 0x02, 0x4a, 0x30 };
+	sendCrypt(*g_pdwSendNormal, carrAutosort, sizeof(carrAutosort), 0);
+	Sleep(3000);
+}
+void DropItem(int iSlot)
+{
+	char carrDropItem[] = { 0x10, 0x07, 0x30, 0x10, 0x24, 0xff, 0x00, 0x00, 0x00, 0x8c, 0x23, 0x00, 0x00, 0x8f, 0x0e, 0x00, 0x00 };
+	char carrAcceptDrop[] = { 0x03, 0x02, 0x3c, 0x00 };
+
+	carrDropItem[3] = iSlot;
+	sendCrypt(*g_pdwSendNormal, carrDropItem, sizeof(carrDropItem), 0);
+	Sleep(200);
+	for (int j = 0; j < 2; j++)
+	{
+		sendCrypt(*g_pdwSendNormal, carrAcceptDrop, sizeof(carrAcceptDrop), 0);
+		Sleep(10);
+	}
+	Sleep(100);
+}
+
+void SellItem(int iSlot)
+{
+	char sellItem[8] = { 0x07, 0x06, 0x30, 0x26, 0x01, 0x00, 0x00, 0x00 };
+
+	sellItem[3] = iSlot;
+	sendCrypt(*g_pdwSendNormal, sellItem, sizeof(sellItem), 0);
+	Sleep(300);
+}
+bool ReadInventoryIcon(int iSlot, DWORD dwInventoryWindow, WORD* wOutput)
+{
+	DWORD dwFirstSlotOffset = 0x15C; // Get this from the AOB instruction or search up icon what writes to
+	DWORD dwIconOffset = 0x180;
+	DWORD dwTemp = 0;
+	WORD wItemIcon = 0;
+	if (false == isMemReadable((LPCVOID)(dwInventoryWindow + (iSlot * 4) + dwFirstSlotOffset), 4, &dwTemp))
+	{
+		sendWhisper("ReadyToWork", "yuh2 " + std::to_string(dwInventoryWindow + (iSlot * 4) + dwFirstSlotOffset));
+		return false;
+	}
+	//sendWhisper("yuhyeetmage", "yuh3 " + std::to_string(dwTemp));
+
+	if (false == isMemReadable((LPCVOID)(dwTemp + dwIconOffset), 2, &wItemIcon))
+	{
+		sendWhisper("ReadyToWork", "yuh4 " + std::to_string(dwTemp + dwFirstSlotOffset));
+		return false;
+	}
+	*wOutput = wItemIcon;
+	return true;
+}
+
+int FindFirstEmptySlot(int iPageNum, DWORD dwInventoryWindow)
+{
+	WORD wItemIcon = 0;
+	for (int i = 0; i < 24 * iPageNum; i++)
+	{
+		if (false == ReadInventoryIcon(i, dwInventoryWindow, &wItemIcon))
+		{
+			return -1;
+		}
+		if (0xFFFF == wItemIcon)
+		{
+			return i;
+		}
+		//DWORD dwTemp = 0;
+		//if (false == isMemReadable((LPCVOID)(dwCurrentWindow + (i * 4) + dwFirstSlotOffset), 4, &dwTemp))
+		//{
+		//	//sendWhisper("yuhyeetmage", "yuh2 " + std::to_string(dwCurrentWindow + (i * 4) + dwFirstSlotOffset));
+		//	break;
+		//}
+		////sendWhisper("yuhyeetmage", "yuh3 " + std::to_string(dwTemp));
+
+		//if (false == isMemReadable((LPCVOID)(dwTemp + dwFirstSlotOffset), 4, &dwTemp))
+		//{
+		//	//sendWhisper("yuhyeetmage", "yuh4 " + std::to_string(dwTemp + dwFirstSlotOffset));
+		//	break;
+		//}
+		//if (0xFFFF == *(WORD*)(*(DWORD*)(dwCurrentWindow + (i * 4) + dwFirstSlotOffset) + dwIconOffset))
+		//{
+		//	iFirstEmptySlot = i;
+		//	//sendWhisper("yuhyeetmage", std::to_string(iFirstEmptySlot));
+		//	break;
+		//}
+	}
+}
+DWORD GetInventoryWindow()
+{
+	DWORD dwFirstSlotOffset = 0x15C; // Get this from the AOB instruction or search up icon what writes to
+	DWORD dwIconOffset = 0x180;
+	DWORD dwTemp = 0;
+	WORD wItemIcon = 0;
+	DWORD dwInventoryWindow = *(DWORD*)g_dwCurrentWindow;
+
+
+	if (false == isMemReadable((LPCVOID)(dwInventoryWindow + (0 * 4) + dwFirstSlotOffset), 4, &dwTemp))
+	{
+		return 0xFFFFFFFF;
+	}
+	//sendWhisper("yuhyeetmage", "yuh3 " + std::to_string(dwTemp));
+
+	if (false == isMemReadable((LPCVOID)(dwTemp + dwIconOffset), 2, &wItemIcon))
+	{
+		return 0xFFFFFFFF;
+	}
+
+	return dwInventoryWindow;
+}
+void AutoLH()
+{
+	std::vector<WORD> vecKeepItems{62942,
+		62943,
+		62944,
+		62945,
+		62946,
+		62947,
+		62948,
+		62949,
+		62950,
+		62951,
+		62952,
+		62953,
+		62954};
+	std::vector<WORD> vecDropItems{30106, 30107};
+
+	if (true == IsDlgButtonChecked(g_hwndMain, DLG_SAVEHPPOTS))
+	{
+		vecKeepItems.push_back(3502);
+		vecKeepItems.push_back(3503);
+		vecKeepItems.push_back(3504);
+	}
+	if (true == IsDlgButtonChecked(g_hwndMain, DLG_SAVESPPOTS))
+	{
+		vecKeepItems.push_back(3507);
+		vecKeepItems.push_back(3508);
+		vecKeepItems.push_back(3509);
+	}
+	char buyFirstRedCapsule[9] = { 0x08, 0x03, 0x30, 0xce, 0xe2, 0x01, 0x00, 0x00, 0x00 };
+	char buyFirstBlueCapsule[9] = { 0x08, 0x03, 0x30, 0xcf, 0xe2, 0x01, 0x00, 0x00, 0x00 };
+	char buySecondRedCapsule[9] = { 0x08, 0x03, 0x30, 0x8e, 0xf9, 0x01, 0x00, 0x00, 0x00 };
+	char buySecondBlueCapsule[9] = { 0x08, 0x03, 0x30, 0x68, 0x03, 0x01, 0x00, 0x00, 0x00 };
+	char* carrCapsulesToBuy[]{ buyFirstRedCapsule, buySecondRedCapsule, buyFirstBlueCapsule, buySecondBlueCapsule };
+	
+	//hover mouse over inventory window and press spacebar
+	int iMinCoins = ((g_wCapsuleIndex == CapsuleIDs::Red2) ? 5000 : 1000);
+	DWORD dwCurrentWindow = 0;
+	DWORD dwFirstSlotOffset = 0x15C; // Get this from the AOB instruction or search up icon what writes to
+	DWORD dwIconOffset = 0x180;
+	WORD wItemIcon = 0;
+	bool bKeepItem = false;
+	int ItemIndex = SendMessage(g_hwndComboBags, (UINT)CB_GETCURSEL,
+		(WPARAM)0, (LPARAM)0);
+	TCHAR  ListItem[256];
+	(TCHAR)SendMessage(g_hwndComboBags, (UINT)CB_GETLBTEXT,
+		(WPARAM)ItemIndex, (LPARAM)ListItem);
+	//MessageBox(g_hwndMain, (LPCWSTR)ListItem, TEXT("Item Selected"), MB_OK);
+	std::wstring wstrNumBags(ListItem);
+	int iPageNum = wcstol(wstrNumBags.c_str(), nullptr, 10);
+	EnableWindow(GetDlgItem(g_hwndMain, BTN_STARTLH), false);
+	SetWindowText(g_hwndMain, L"Waiting for inventory window...");
+	while (false == CheckForKey(VK_SPACE))
+	{
+		Sleep(10);
+	}
+	dwCurrentWindow = GetInventoryWindow();
+	while (dwCurrentWindow == 0xFFFFFFFF)
+	{
+		dwCurrentWindow = GetInventoryWindow();
+	}
+	SetWindowText(g_hwndMain, L"AutoFiesta");
+	SetWindowText(g_hwndLHRBTN, L"Stop LH Bot");
+	EnableWindow(GetDlgItem(g_hwndMain, BTN_STARTLH), true);
+	//sendWhisper("yuhyeetmage", "yuh1 " + std::to_string(dwCurrentWindow));
+	//autosort inventory
+	while (iMinCoins <= *g_pdwLHCoins)
+	{
+		AutoSort();
+
+		//find first slot
+		// assume number of pages = 2
+		int iFirstEmptySlot = FindFirstEmptySlot(iPageNum, dwCurrentWindow);
+
+		if (-1 == iFirstEmptySlot)
+		{
+			return;
+		}
+
+		for (int i = iFirstEmptySlot; i < (24 * iPageNum) - 1; i++)
+		{
+			//Buy LH capsule
+			if (iMinCoins > *g_pdwLHCoins)
+			{
+				break;
+			}
+			sendCrypt(*g_pdwSendNormal, carrCapsulesToBuy[g_wCapsuleIndex], 9, 0);
+			Sleep(500);
+			if (!g_bStartLHBot) return;
+		}
+		Sleep(1000);
+		wItemIcon = 0;
+		// Keep buying until slot is filled
+		if (false == ReadInventoryIcon((24 * iPageNum) - 2, dwCurrentWindow, &wItemIcon))
+		{
+			return;
+		}
+		while (0xFFFF == wItemIcon)
+		{
+			if (iMinCoins > *g_pdwLHCoins)
+			{
+				break;
+			}
+			sendCrypt(*g_pdwSendNormal, carrCapsulesToBuy[g_wCapsuleIndex], 9, 0);
+			Sleep(850);
+		
+			if (false == ReadInventoryIcon((24 * iPageNum) - 2, dwCurrentWindow, &wItemIcon))
+			{
+				return;
+			}
+			if (!g_bStartLHBot) return;
+		}
+		int iCapsuleStartPoint = FindFirstEmptySlot(iPageNum, dwCurrentWindow) - 1;
+		for (int i = iCapsuleStartPoint; i >= iFirstEmptySlot; i--)
+		{
+			int iOpenedItem = i + 1;
+			// i is the slot where we are currently opening a capsule, so since we are starting backwards
+			// then i + 1 is the slot where the opened item goes
+			// Use LH capsule
+			g_wCapsuleItem = 0;
+			UseSlot(i);
+			Timer tTimeout;
+			while (0 == g_wCapsuleItem)
+			{
+				if (true == tTimeout.HasDurationPassed(1))
+				{
+					UseSlot(i);
+					SellItem(i);
+					tTimeout.Reset();
+				}
+				Sleep(1);
+				if (!g_bStartLHBot) return;
+			}
+			for (auto dropItem : vecDropItems)
+			{
+				if (dropItem == g_wCapsuleItem)
+				{
+					//sendWhisper("ReadyToWork", "Yay! " + std::to_string(g_wCapsuleItem) + " in slot " + std::to_string(iOpenedItem));
+					DropItem(iOpenedItem);
+					Sleep(100);
+					break;
+				}
+				if (!g_bStartLHBot) return;
+			}
+			for (auto KeepItem : vecKeepItems)
+			{
+				if (KeepItem == g_wCapsuleItem)
+				{
+					//sendWhisper("ReadyToWork", "Woo! " + std::to_string(g_wCapsuleItem) + " in slot " + std::to_string(iOpenedItem));
+					bKeepItem = true;
+					break;
+				}
+				if (!g_bStartLHBot) return;
+			}
+			if (false == bKeepItem)
+			{
+				SellItem(iOpenedItem);
+				Sleep(100);
+			}
+			bKeepItem = false;
+			//Sleep(500);
+		}
+	}
 }

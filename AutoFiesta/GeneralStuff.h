@@ -1,9 +1,5 @@
 #pragma once
-#include <atomic>
-#include <vector>
-#include <WinSock2.h>
-#include <windows.h>
-#include <string>
+#include "WindowStuff.h"
 
 union IDtoBYTE
 {
@@ -113,4 +109,21 @@ bool isMemReadable(LPCVOID memory, int bytes, void* pvStorage = nullptr) {
 		//cout << "RPM failed at " << hex << memory << " with " << GetLastError() << endl;
 		return false;
 	}
+}
+
+bool CheckForKey(BYTE byKey)
+{
+	DWORD dwCurrentProcessID = GetCurrentProcessId();
+	DWORD dwActiveWindowProcessID = 0;
+	GetWindowThreadProcessId(GetForegroundWindow(), &dwActiveWindowProcessID);
+
+	if (dwActiveWindowProcessID == dwCurrentProcessID)
+	{
+		if (GetAsyncKeyState(byKey) & 0x8000)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }

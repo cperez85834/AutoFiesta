@@ -157,6 +157,7 @@
     <ClInclude Include="PacketFunctions.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="QuestFunctions.h" />
+    <ClInclude Include="WindowStuff.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />
