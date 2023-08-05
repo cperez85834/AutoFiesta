@@ -15,6 +15,9 @@ DWORD* g_pdwCurrentEncryptionIndex = 0;
 WORD* g_pwCurrentEncryptionIndex = 0;
 WORD g_wCurrentEncryptionIndex = 0;
 
+// buff stuff
+volatile bool g_bDeleteBuffs = false;
+
 // LH stuff
 WORD g_wCapsuleItem = 0;
 WORD g_warrCapsuleIDs[] = { 58062, 63886, 58063, 872 };
@@ -31,6 +34,7 @@ enum CapsuleIDs
 //Base Pointers
 DWORD g_dwFiestaBase = 0;
 DWORD g_dwEntityPointer;
+BYTE* pbyPlayerID;
 DWORD g_dwCurrentWindow;
 DWORD* g_pdwLHCoins;
 DWORD dwEntityFirstOffset = 0x28;
@@ -85,7 +89,10 @@ void sendEncryptPacketFunc(SOCKET socSendSocket, char* buffer, int numBytes) {
     delete[] packetToEncrypt;
 
 }
-
+void GetPlayerID()
+{
+	pbyPlayerID = (BYTE*)(*(DWORD*)(*(DWORD*)(g_dwEntityPointer + dwEntityFirstOffset) + dwEntitySecondOffset) + dwEntityMobTargetIdOffset);
+}
 void sendCrypt(SOCKET s, char* buf, int len, int flags)
 {
 	UNREFERENCED_PARAMETER(flags);
@@ -142,13 +149,6 @@ void sendWhisper(std::string user, std::string message) {
 
 	sendCrypt(*g_pdwSendNormal, whisperPacket, packetLength + 1, 0);
 	delete whisperPacket;
-}
-
-void SendPacketInspector(BYTE* pbBuffer, BYTE* pbOriginalBuffer, int iSize)
-{
-	UNREFERENCED_PARAMETER(pbBuffer);
-	UNREFERENCED_PARAMETER(pbOriginalBuffer);
-	UNREFERENCED_PARAMETER(iSize);
 }
 
 int GetEntityList(DWORD dwEntityList[1024])
@@ -471,14 +471,14 @@ bool ReadInventoryIcon(int iSlot, DWORD dwInventoryWindow, WORD* wOutput)
 	WORD wItemIcon = 0;
 	if (false == isMemReadable((LPCVOID)(dwInventoryWindow + (iSlot * 4) + dwFirstSlotOffset), 4, &dwTemp))
 	{
-		sendWhisper("ReadyToWork", "yuh2 " + std::to_string(dwInventoryWindow + (iSlot * 4) + dwFirstSlotOffset));
+		//sendWhisper("ReadyToWork", "yuh2 " + std::to_string(dwInventoryWindow + (iSlot * 4) + dwFirstSlotOffset));
 		return false;
 	}
 	//sendWhisper("yuhyeetmage", "yuh3 " + std::to_string(dwTemp));
 
 	if (false == isMemReadable((LPCVOID)(dwTemp + dwIconOffset), 2, &wItemIcon))
 	{
-		sendWhisper("ReadyToWork", "yuh4 " + std::to_string(dwTemp + dwFirstSlotOffset));
+		//sendWhisper("ReadyToWork", "yuh4 " + std::to_string(dwTemp + dwFirstSlotOffset));
 		return false;
 	}
 	*wOutput = wItemIcon;
@@ -518,6 +518,8 @@ int FindFirstEmptySlot(int iPageNum, DWORD dwInventoryWindow)
 		//	break;
 		//}
 	}
+
+	return -1;
 }
 DWORD GetInventoryWindow()
 {
@@ -663,24 +665,30 @@ void AutoLH()
 			g_wCapsuleItem = 0;
 			UseSlot(i);
 			Timer tTimeout;
+			int iAttempts = 0;
 			while (0 == g_wCapsuleItem)
 			{
-				if (true == tTimeout.HasDurationPassed(1))
+				if (true == tTimeout.HasDurationPassed(2))
 				{
 					UseSlot(i);
-					SellItem(i);
+					//SellItem(i);
 					tTimeout.Reset();
+					iAttempts++;
 				}
 				Sleep(1);
 				if (!g_bStartLHBot) return;
+				if (iAttempts == 5)
+				{
+					return;
+				}
 			}
 			for (auto dropItem : vecDropItems)
 			{
 				if (dropItem == g_wCapsuleItem)
 				{
 					//sendWhisper("ReadyToWork", "Yay! " + std::to_string(g_wCapsuleItem) + " in slot " + std::to_string(iOpenedItem));
-					DropItem(iOpenedItem);
 					Sleep(100);
+					DropItem(iOpenedItem);
 					break;
 				}
 				if (!g_bStartLHBot) return;
@@ -697,8 +705,8 @@ void AutoLH()
 			}
 			if (false == bKeepItem)
 			{
-				SellItem(iOpenedItem);
 				Sleep(100);
+				SellItem(iOpenedItem);
 			}
 			bKeepItem = false;
 			//Sleep(500);

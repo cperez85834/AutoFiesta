@@ -50,7 +50,9 @@ DWORD dwJmpLoginInfo;
 DWORD dwJmpBackPrelogin;
 
 //Zoom
-float g_fZoomLimit = 700;
+volatile float g_fZoomLimit = 700;
+volatile bool g_bZoomUnlocker = false;
+
 bool HookFunctionAddy(void* toHook, void* ourFunct, int len)
 {
     if (len < 5) {
@@ -128,18 +130,32 @@ void __declspec(naked) UnlockEncryption() {
         //jmp dwJmpSendUnlock
     }
 }
+float GetZoomValue()
+{
+    wchar_t wcharrTemp[100] = { 0 };
+    GetWindowText(GetDlgItem(g_hwndMain, DLG_ZOOMTXT), wcharrTemp, 100);
+    float result = wcstof(wcharrTemp, nullptr);
+    //SetWindowText(g_hwndMain, std::to_wstring(result).c_str());
+    return (result == 0 ? 300 : result);
+}
 void __declspec(naked) ZoomHook()
 {
     __asm
     {
         pushad
         pushfd
+        cmp g_bZoomUnlocker, 1
+        jne zoomExit
+        sub esp, 4
+        movss dword ptr ss: [esp], xmm1
     }
-    g_fZoomLimit = 700;
+    g_fZoomLimit = GetZoomValue();
     __asm
     {
         movss xmm2, g_fZoomLimit
-        popfd
+        movss xmm1, dword ptr ss: [esp]
+        add esp, 4
+        zoomExit: popfd
         popad
         movaps xmm0, xmm1
         comiss xmm1,xmm2
@@ -228,6 +244,40 @@ void __declspec(naked) InfoTextBoxDetour()
 #pragma optimize( "", off )
 void RecvPacketInspector(BYTE* pbBuffer, int iSize, BYTE* pbRealBuffer)
 {
+    // For deleting buffs
+    if (g_bDeleteBuffs)
+    {
+        for (int j = 0; j < iSize; j++)
+        {
+            if (pbBuffer[j] == 0x29)
+            {
+                if (j + 13 > iSize) break;
+                
+                // 0xe2cf is blue capsule 1
+                GetPlayerID();
+                if (pbBuffer[j + 1] == 0x24 && *(WORD*)(&pbBuffer[j + 13]) == *(WORD*)pbyPlayerID)
+                {
+                    WORD wBuffID = *(WORD*)(&pbBuffer[j + 2]);
+                    muxNoBuff.lock();
+                    vecBuffsGotten.push_back(wBuffID);
+                    muxNoBuff.unlock();
+                    //for (auto buff : vecNoBuffList)
+                    //{
+                    //    if (buff == wBuffID)
+                    //    {
+                    //        char carrDeleteBuff[] = { 0x04, 0x54, 0x24, 0x14, 0x00 };
+                    //        *(WORD*)(&carrDeleteBuff[3]) = wBuffID;
+                    //        sendCrypt(*g_pdwSendNormal, carrDeleteBuff, sizeof(carrDeleteBuff), 0);
+                    //        break;
+                    //    }
+                    //}
+                    j += 12;
+                    continue;
+                    // keep searching packet for more
+                }
+            }
+        }
+    }
     //capsule was in slot 0, slot 1 was empty
     //capsule = 0xe2cf, result is eld scroll = 0x09ca
 
@@ -279,20 +329,102 @@ void __declspec(naked) RecvPacketLogger()
         jmp[dwJmpBackRecvLogger]
     }
 }
+void SendPacketInspector(BYTE* pbBuffer, BYTE* pbOriginalBuffer, int iSize)
+{
+    UNREFERENCED_PARAMETER(pbBuffer);
+    UNREFERENCED_PARAMETER(pbOriginalBuffer);
+    UNREFERENCED_PARAMETER(iSize);
+
+    if (g_bDistributed == true)
+    {
+        if (iSize == 0x22 + 1 && pbBuffer[1] == 0x2e && pbBuffer[2] == 0x0c)
+        {
+            for (int i = 1; i < sizeof(carrAuthPacket); i++)
+            {
+                pbOriginalBuffer[i] = carrAuthPacket[i];
+                pbBuffer[i] = carrAuthPacket[i];
+            }
+        }
+    }
+    if (g_bLeftRingEquipper)
+    {
+        wchar_t wcharrTemp1[20] = { 0 };
+        wchar_t wcharrTemp2[20] = { 0 };
+        GetWindowText(GetDlgItem(g_hwndMain, DLG_LRING1TXT), wcharrTemp1, 20);
+        GetWindowText(GetDlgItem(g_hwndMain, DLG_LRING2TXT), wcharrTemp2, 20);
+        long result1 = wcstol(wcharrTemp1, nullptr, 0);
+        long result2 = wcstol(wcharrTemp2, nullptr, 0);
+
+        //MessageBox(g_hwndMain, wcharrTemp1, wcharrTemp2, MB_OK);
+        if (CheckForKey((BYTE)result1) || CheckForKey((BYTE)result2))
+        {
+            //MessageBox(g_hwndMain, L"haha", L"haha", MB_OK);
+            if (iSize == 0x04 && pbBuffer[1] == 0x0f && pbBuffer[2] == 0x30)
+            {
+                //MessageBox(g_hwndMain, L"yoyo", L"yoyo", MB_OK);
+                // this won't do anything, we need to send a new packet after this one
+                pbBuffer[1] = 0x10;
+                pbOriginalBuffer[1] = 0x10;
+                g_bySlotToEquip = pbBuffer[3];
+            }
+        }
+    }
+    // FOR CLICKING
+    //SENT ON SOCKET: b44 WITH STARTING INDEX: 1
+    //04 10 30 22 0f 0"d right ring
+    //SENT ON SOCKET: b44 WITH STARTING INDEX: 1
+    //04 10 30 21 10 0!d left ring
+    // FOR EQUIP VIA HOTBAR
+    //03 0f 30 22 0" right ring
+}
+void __declspec(naked) SendPacketLogger()
+{
+    pbSendPacketBuffer = nullptr;
+    iSendBufferSize = 0;
+    __asm
+    {
+        pushad
+        pushfd
+        mov edi, dword ptr ds : [ebp + 8]
+        mov eax, [ecx + 4]
+        mov g_dwCurrentSendingSocket, eax
+        mov eax, 0
+        mov al, byte ptr ds : [edx + edi - 1]
+        cmp eax, 0x4000
+        jge exitloop
+        mov iSendBufferSize, eax
+        lea ecx, [edx + edi - 1]
+        mov pbSendPacketBuffer, ecx
+    }
+
+    memcpy(ucUnencryptedSendPacket, pbSendPacketBuffer, iSendBufferSize + 1);
+    SendPacketInspector(ucUnencryptedSendPacket, pbSendPacketBuffer, iSendBufferSize + 1);
+    __asm
+    {
+    exitloop: popfd
+    popad
+    push ebx
+    push edi
+    mov edi, dword ptr ss : [ebp + 8]
+    mov ebx, 0x1F3
+    jmp[dwJmpBackSendLogger]
+    }
+}
 void ToggleMobHP()
 {
-    BYTE* pbyPatchAddy = (BYTE*)(g_dwFiestaBase + 0x27C7A1);
+    DWORD dwOffset = 0x27C8B1;
+    BYTE* pbyPatchAddy = (BYTE*)(g_dwFiestaBase + dwOffset);
     DWORD curProtection;
     VirtualProtect(pbyPatchAddy, 1, PAGE_EXECUTE_READWRITE, &curProtection);
 
     // for mob hp 27C7A1 set byte to 74 for no hp, EB for hp
-    if (*(BYTE*)(g_dwFiestaBase + 0x27C7A1) == 0x74)
+    if (*(BYTE*)(g_dwFiestaBase + dwOffset) == 0x74)
     {
-        *(BYTE*)(g_dwFiestaBase + 0x27C7A1) = 0xEB;
+        *(BYTE*)(g_dwFiestaBase + dwOffset) = 0xEB;
     }
     else
     {
-        *(BYTE*)(g_dwFiestaBase + 0x27C7A1) = 0x74;
+        *(BYTE*)(g_dwFiestaBase + dwOffset) = 0x74;
     }
 
     DWORD temp;
@@ -302,18 +434,18 @@ void ToggleMobHP()
 void InitializeHooks()
 {
     //Start of encryption function at mov ebp,esp
-    DWORD dwLockEncryption = g_dwFiestaBase + 0x4A1961; // done
+    DWORD dwLockEncryption = g_dwFiestaBase + 0x4A1A41; // done
     dwJmpSendLock = dwLockEncryption + 0x6;
 
     // After send is done
     // mov esp,ebp
-    DWORD dwUnlockEncryption = g_dwFiestaBase + 0x44094F; // done
+    DWORD dwUnlockEncryption = g_dwFiestaBase + 0x440A3F; // done
     //dwJmpSendUnlock = dwUnlockEncryption + 0x7;
 
     //DWORD hookAddressMove = fiestaBase + 0x288918;
     //push ebx
     //push edi
-    DWORD dwHookPreEncryption = g_dwFiestaBase + 0x4A196D; //encryption hook, preRNG function done
+    DWORD dwHookPreEncryption = g_dwFiestaBase + 0x4A1A4D; //encryption hook, preRNG function done
     dwJmpBackSendLogger = dwHookPreEncryption + 0xA;
 
     //movaps xmm0,xmm1
@@ -323,7 +455,7 @@ void InitializeHooks()
     dwJmpBackZoomHook = dwHookZoom + 0x6;
 
     //mov ecx, dword ptr ds:[eax+0x1000C]
-    DWORD dwHookRecv = g_dwFiestaBase + 0x440B9E;
+    DWORD dwHookRecv = g_dwFiestaBase + 0x440C8E;
     dwJmpBackRecvLogger = dwHookRecv + 0x6;
 
     //lea eax,dword ptr ss:[ebp-114]
@@ -332,7 +464,7 @@ void InitializeHooks()
     //jmpBackAuth = hookAuthentication + 0x6;
 
     //lea eax, ss:[ebp-0x104]
-    DWORD dwHookInfoTextBox = g_dwFiestaBase + 0x2C8EE7;
+    DWORD dwHookInfoTextBox = g_dwFiestaBase + 0x2C9007;
     dwJmpInfoTextBox = dwHookInfoTextBox + 0x6;
 
     //mov edx, dword ptr ss:[ebp-0xC]
@@ -341,7 +473,7 @@ void InitializeHooks()
 
     HookFunctionAddy((void*)dwHookRecv, RecvPacketLogger, 6);
     ////HookFunctionAddy((void*)dwTargetBuff, BuffInspector, 6);
-    //HookFunctionAddy((void*)dwHookPreEncryption, SendPacketLogger, 10);
+    HookFunctionAddy((void*)dwHookPreEncryption, SendPacketLogger, 10);
     HookFunctionAddy((void*)dwLockEncryption, LockEncryption, 6);
     HookFunctionAddy((void*)dwHookZoom, ZoomHook, 6);
     HookFunctionAddy((void*)dwUnlockEncryption, UnlockEncryption, 7);
@@ -356,9 +488,11 @@ void InitializeHooks()
 
 DWORD WINAPI main(LPVOID param)
 {
+    //g_bDeleteBuffs = true;
+    //g_bDistributed = true;
     g_dwFiestaBase = (DWORD)GetModuleHandleA(NULL);
 
-    encryptPacketFunc = (_encryptPacketFunc)(g_dwFiestaBase + 0x4A1960);
+    encryptPacketFunc = (_encryptPacketFunc)(g_dwFiestaBase + 0x4A1A40);
 
     // Do not attach until the send address is non-null
     while (*(DWORD*)(g_dwFiestaBase + 0x79B06C) == 0)
@@ -397,7 +531,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             hwnd, (HMENU)RBTN_MAIN, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
         CreateWindow(L"button", L"Auto Turn-in",
             WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
-            20, 50, 185, 35,
+            20, 50, 150, 35,
             hwnd, (HMENU)DLG_AUTOTI, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
         CreateWindow(L"button", L"Mob HP",
             WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
@@ -407,6 +541,31 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON,
             20, 115, 185, 35,
             hwnd, (HMENU)RBTN_LH, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        g_hwndZoomDLG = CreateWindow(L"button", L"Zoom",
+            WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
+            200, 50, 70, 35,
+            hwnd, (HMENU)DLG_ZOOMUNL, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        CreateWindowEx(WS_EX_CLIENTEDGE, L"Edit", L"300",
+            WS_VISIBLE | WS_CHILD,
+            275, 50, 50, 35,
+            hwnd, (HMENU)DLG_ZOOMTXT, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        CreateWindow(L"button", L"No Buffs",
+            WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
+            350, 50, 70, 35,
+            hwnd, (HMENU)DLG_NOBUFFS, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        g_hwndLeftRingDLG = CreateWindow(L"button", L"Left Ring",
+            WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
+            200, 100, 70, 35,
+            hwnd, (HMENU)DLG_LRINGUNL, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        CreateWindowEx(WS_EX_CLIENTEDGE, L"Edit", L"30",
+            WS_VISIBLE | WS_CHILD,
+            300, 100, 50, 35,
+            hwnd, (HMENU)DLG_LRING1TXT, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        CreateWindowEx(WS_EX_CLIENTEDGE, L"Edit", L"31",
+            WS_VISIBLE | WS_CHILD,
+            375, 100, 50, 35,
+            hwnd, (HMENU)DLG_LRING2TXT, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
 
         CreateWindow(L"button", L"Red 1",
             WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON,
@@ -452,6 +611,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         CreateThread(0, 0, CheckQuestsThread, hwnd, 0, 0);
         //CheckDlgButton(hwnd, RBTN_MAIN, BST_CHECKED);
         SendMessage(g_hwndMainRBTN, BM_CLICK, (WPARAM)0, (LPARAM)0);
+        EnableWindow(GetDlgItem(hwnd, DLG_ZOOMTXT), false);
+        EnableWindow(GetDlgItem(hwnd, DLG_LRING1TXT), false);
+        EnableWindow(GetDlgItem(hwnd, DLG_LRING2TXT), false);
         CheckDlgButton(hwnd, RBTN_LHRED1, BST_CHECKED);
         SendMessage(g_hwndComboBags, CB_SETCURSEL, (WPARAM)0, (LPARAM)0);
 
@@ -471,6 +633,54 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             else {
                 CheckDlgButton(hwnd, DLG_AUTOTI, BST_CHECKED);
                 g_bAutoTurnIn = true;
+            }
+            break;
+        }
+        case DLG_ZOOMUNL:
+        {
+            if (true == IsDlgButtonChecked(hwnd, DLG_ZOOMUNL))
+            {
+                CheckDlgButton(hwnd, DLG_ZOOMUNL, BST_UNCHECKED);
+                EnableWindow(GetDlgItem(hwnd, DLG_ZOOMTXT), false);
+                g_bZoomUnlocker = false;
+            }
+            else
+            {
+                CheckDlgButton(hwnd, DLG_ZOOMUNL, BST_CHECKED);
+                EnableWindow(GetDlgItem(hwnd, DLG_ZOOMTXT), true);
+                g_bZoomUnlocker = true;
+            }
+            break;
+        }
+        case DLG_NOBUFFS:
+        {
+            if (true == IsDlgButtonChecked(hwnd, DLG_NOBUFFS))
+            {
+                CheckDlgButton(hwnd, DLG_NOBUFFS, BST_UNCHECKED);
+                g_bDeleteBuffs = false;
+            }
+            else
+            {
+                CheckDlgButton(hwnd, DLG_NOBUFFS, BST_CHECKED);
+                g_bDeleteBuffs = true;
+            }
+            break;
+        }
+        case DLG_LRINGUNL:
+        {
+            if (true == IsDlgButtonChecked(hwnd, DLG_LRINGUNL))
+            {
+                CheckDlgButton(hwnd, DLG_LRINGUNL, BST_UNCHECKED);
+                EnableWindow(GetDlgItem(hwnd, DLG_LRING1TXT), false);
+                EnableWindow(GetDlgItem(hwnd, DLG_LRING2TXT), false);
+                g_bLeftRingEquipper = false;
+            }
+            else
+            {
+                CheckDlgButton(hwnd, DLG_LRINGUNL, BST_CHECKED);
+                EnableWindow(GetDlgItem(hwnd, DLG_LRING1TXT), true);
+                EnableWindow(GetDlgItem(hwnd, DLG_LRING2TXT), true);
+                g_bLeftRingEquipper = true;
             }
             break;
         }

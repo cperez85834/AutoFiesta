@@ -77,13 +77,14 @@ std::vector<WORD> g_vecAutoQuestList =
 20134, //Serben and his Wood
 65209, //Help Yuna 1
 20221, //The Predator Leader
+65210, //Help Yuna 2
 20228, //Finding Peace
 65211, //Help Yuna 3
 65249, //A Dark Source of Energy
 65273, //Healing the Creatures
 65305, //Corrupt Intervention
 65274, //Collecting the Corrupted Souls
-65282, //Invasion from the Other Side
+65283, //Invasion from the Other Side
 65331, //Prune the Garden
 65327, //Rotten Leafs
 65322, //Bug Infestation
@@ -342,10 +343,21 @@ DWORD WINAPI CheckQuestsThread(LPVOID param)
 {
 	while (1)
 	{
-		while (IsDlgButtonChecked((HWND)param, 1))
+		if (IsDlgButtonChecked((HWND)param, DLG_AUTOTI))
 		{
 			CheckQuests();
 			Sleep(100);
+		}
+		if (true == g_bLeftRingEquipper)
+		{
+			if (0xFF != g_bySlotToEquip)
+			{
+				// left from inventory, right to equip
+				char carrSwapEquipSlots[] = { 0x04, 0x10, 0x30, g_bySlotToEquip, 0x10 };
+				sendCrypt(*g_pdwSendNormal, carrSwapEquipSlots, sizeof(carrSwapEquipSlots), 0);
+				g_bySlotToEquip = 0xFF;
+				Sleep(200);
+			}
 		}
 		if (false == g_strCharToTarget.empty())
 		{
@@ -395,7 +407,38 @@ DWORD WINAPI CheckQuestsThread(LPVOID param)
 			g_bStartLHBot = false;
 			SetWindowText(g_hwndLHRBTN, L"Start LH Bot");
 		}
-		Sleep(10);
+		if (true == g_bDeleteBuffs)
+		{
+			muxNoBuff.lock();
+			if (vecBuffsGotten.empty() != true)
+			{
+				for (auto buff : vecBuffsGotten)
+				{
+					vecBuffsGottenCopy.push_back(buff);
+				}
+				vecBuffsGotten.clear();
+			}
+			muxNoBuff.unlock();
+
+			if (vecBuffsGottenCopy.empty() != true)
+			{
+				for (auto buff : vecBuffsGottenCopy)
+				{
+					if (std::find(vecNoBuffList.begin(), vecNoBuffList.end(), buff) != vecNoBuffList.end())
+					{
+						//MessageBox(g_hwndMain, L"FOUND", std::to_wstring(buff).c_str(), MB_OK);
+						srand((unsigned)time(0));
+						char carrDeleteBuff[] = { 0x04, 0x54, 0x24, 0x14, 0x00 };
+						*(WORD*)(&carrDeleteBuff[3]) = buff;
+						int iRandomDelay = (rand() % 601);
+						Sleep(800 + iRandomDelay);
+						sendCrypt(*g_pdwSendNormal, carrDeleteBuff, sizeof(carrDeleteBuff), 0);
+					}
+				}
+				vecBuffsGottenCopy.clear();
+			}
+		}
+		Sleep(1);
 	}
 
 	return 0;
