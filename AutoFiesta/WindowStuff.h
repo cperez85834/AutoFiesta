@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <string>
 #include <mutex>
+#include <fstream>
 
 #define DLG_AUTOTI 1000
 #define DLG_MOBHP 1001
@@ -16,7 +17,7 @@
 #define DLG_LRING1TXT 1006
 #define DLG_LRING2TXT 1007
 #define DLG_NOBUFFS 1008
-
+#define DLG_RAIDHEALER 1009
 
 #define RBTN_LH 1100
 #define RBTN_LHRED1 1101
@@ -29,7 +30,7 @@
 #define BTN_STARTLH 1108
 
 std::vector<WORD> g_vecLHButtons{1101, 1102, 1103, 1104, 1105, 1106, 1107};
-std::vector<WORD> g_vecMainButtons{1000, 1001, 1003, 1004, 1005, 1006, 1007, 1008};
+std::vector<WORD> g_vecMainButtons{1000, 1001, 1003, 1004, 1005, 1006, 1007, 1008, 1009};
 
 //int g_iLHButtonDisableList[] = { 1000,1001,1002,1100,1101,1102,1103,1104,1105,1106,1107 };
 HWND g_hwndMain;

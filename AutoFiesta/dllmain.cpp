@@ -162,17 +162,11 @@ void __declspec(naked) ZoomHook()
         jmp dwJmpBackZoomHook
     }
 }
-void InspectInfoText()
+bool CheckTarInfo(std::string strRecvInfo)
 {
-    std::string strInfoTextRecv(g_ucInfoTextRecv);
-
-
-    //cout << "Message found: " << strInfoText << endl;
-
-
-    if (strInfoTextRecv.find("Unknown command") != std::string::npos)
+    if (strRecvInfo.find("Unknown command") != std::string::npos)
     {
-        if (isMemReadable(g_ucInfoTextSent, 1) == false) return;
+        if (isMemReadable(g_ucInfoTextSent, 1) == false) return false;
 
         std::string strInfoTextSent(g_ucInfoTextSent);
         strInfoTextSent.resize(0x20, '\0');
@@ -183,7 +177,7 @@ void InspectInfoText()
             sztLoc = strInfoTextSent.find("/tar ");
             if (sztLoc == std::string::npos)
             {
-                return;
+                return false;
             }
             sztLoc += 5;
         }
@@ -216,8 +210,115 @@ void InspectInfoText()
         //{
         //    g_ucInfoTextRecv[sztLoc] = '\0';
         //}
+        return true;
 
     }
+    return false;
+}
+bool CheckMiInfo(std::string strRecvInfo)
+{
+    if (strRecvInfo.find("Unknown command") != std::string::npos)
+    {
+        if (isMemReadable(g_ucInfoTextSent, 1) == false) return false;
+
+        std::string strInfoTextSent(g_ucInfoTextSent);
+        strInfoTextSent.resize(0x20, '\0');
+        size_t sztLoc = strInfoTextSent.find("/mi ");
+
+        if (sztLoc == std::string::npos)
+        {
+            return false;
+        }
+
+        sztLoc += 4;
+
+        size_t sztFileLength = 0;
+        while (strInfoTextSent[sztLoc] != '\0')
+        {
+            sztFileLength++;
+            sztLoc++;
+        }
+        g_strMassInviteFile.clear();
+        g_strMassInviteFile = strInfoTextSent.substr(sztLoc - sztFileLength, sztFileLength);
+        g_strMassInviteFile += ".txt";
+
+        std::string strNewRecv;
+        std::string strOldRecv = "Unknown command.";
+        strNewRecv = "Executing mass invite...";
+
+        sztLoc = 0;
+        for (; sztLoc < strNewRecv.length(); sztLoc++)
+        {
+            g_ucInfoTextRecv[sztLoc] = strNewRecv[sztLoc];
+        }
+        // Client might crash because ill be overwriting more characters than allocated for Unknown Command. Might have to shorten targeting text.
+        g_ucInfoTextRecv[sztLoc] = '\0';
+        //for (; sztLoc < strOldRecv.length(); sztLoc++)
+        //{
+        //    g_ucInfoTextRecv[sztLoc] = '\0';
+        //}
+        return true;
+    }
+    return false;
+}
+bool CheckMbInfo(std::string strRecvInfo)
+{
+    if (strRecvInfo.find("Unknown command") != std::string::npos)
+    {
+        if (isMemReadable(g_ucInfoTextSent, 1) == false) return false;
+
+        std::string strInfoTextSent(g_ucInfoTextSent);
+        strInfoTextSent.resize(0x20, '\0');
+        size_t sztLoc = strInfoTextSent.find("/mb ");
+
+        if (sztLoc == std::string::npos)
+        {
+            return false;
+        }
+
+        sztLoc += 4;
+
+        size_t sztFileLength = 0;
+        while (strInfoTextSent[sztLoc] != '\0')
+        {
+            sztFileLength++;
+            sztLoc++;
+        }
+        g_strMassBanFile.clear();
+        g_strMassBanFile = strInfoTextSent.substr(sztLoc - sztFileLength, sztFileLength);
+        g_strMassBanFile += ".txt";
+
+        std::string strNewRecv;
+        std::string strOldRecv = "Unknown command.";
+        strNewRecv = "Executing mass ban...";
+
+        sztLoc = 0;
+        for (; sztLoc < strNewRecv.length(); sztLoc++)
+        {
+            g_ucInfoTextRecv[sztLoc] = strNewRecv[sztLoc];
+        }
+        // Client might crash because ill be overwriting more characters than allocated for Unknown Command. Might have to shorten targeting text.
+        g_ucInfoTextRecv[sztLoc] = '\0';
+        //for (; sztLoc < strOldRecv.length(); sztLoc++)
+        //{
+        //    g_ucInfoTextRecv[sztLoc] = '\0';
+        //}
+        return true;
+    }
+    return false;
+}
+void CustomChatFunctions()
+{
+    std::string strInfoTextRecv(g_ucInfoTextRecv);
+
+    // recv buffer will be modified, so only successfully complete one
+    if (true == CheckTarInfo(strInfoTextRecv)) return;
+    if (true == CheckMiInfo(strInfoTextRecv)) return;
+    if (true == CheckMbInfo(strInfoTextRecv)) return;
+}
+void InspectInfoText()
+{
+    CustomChatFunctions();
 }
 
 void __declspec(naked) InfoTextBoxDetour()
@@ -334,6 +435,11 @@ void SendPacketInspector(BYTE* pbBuffer, BYTE* pbOriginalBuffer, int iSize)
     UNREFERENCED_PARAMETER(pbBuffer);
     UNREFERENCED_PARAMETER(pbOriginalBuffer);
     UNREFERENCED_PARAMETER(iSize);
+
+    if (iSize == 5 && pbBuffer[1] == 0x01 && pbBuffer[2] == 0x24) {
+        targetID[0] = pbBuffer[3];
+        targetID[1] = pbBuffer[4];
+    }
 
     if (g_bDistributed == true)
     {
@@ -504,6 +610,10 @@ DWORD WINAPI main(LPVOID param)
     g_pdwCurrentEncryptionIndex = (DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79B06C) + 0x10038);
     g_pwCurrentEncryptionIndex = (WORD*)(*(DWORD*)(g_pdwCurrentEncryptionIndex));
 
+    g_pdwSendSpecial = (DWORD*)(*(DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79B084) + 0x10038) + 0x4); //difference is 0x0
+    g_pdwCurrentEncryptionIndexSpecial = (DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79B084) + 0x10038);
+    g_pwCurrentEncryptionIndexSpecial = (WORD*)(*(DWORD*)(g_pdwCurrentEncryptionIndexSpecial));
+
    // MessageBox(NULL, L"Look!", std::to_wstring(g_dwFiestaBase).c_str(),
       //  MB_ICONEXCLAMATION | MB_OK);
     int questPointerOffset = 0x87E84C;
@@ -513,7 +623,10 @@ DWORD WINAPI main(LPVOID param)
     g_dwEntityPointer = g_dwFiestaBase + 0x85C1C8;// 0x7193F0;
     g_dwCurrentWindow = g_dwFiestaBase + 0x882630;
     g_pdwLHCoins = (DWORD*)(g_dwFiestaBase + 0x785620);
-
+    g_pchCharacterClass = (char*)(g_dwFiestaBase + 0x85E098);
+    //g_pdwPlayerBase = (DWORD*)(g_dwFiestaBase + 0x85C39C);
+    g_pdwMana = (DWORD*)(g_dwFiestaBase + 0x784C00); // done just cheat engine mana
+ 
     InitializeHooks();
 
     WinMain((HINSTANCE)param, 0, 0, SW_SHOW);
@@ -551,8 +664,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             hwnd, (HMENU)DLG_ZOOMTXT, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
         CreateWindow(L"button", L"No Buffs",
             WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
-            350, 50, 70, 35,
+            350, 50, 100, 35,
             hwnd, (HMENU)DLG_NOBUFFS, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+        CreateWindow(L"button", L"Raid Heal Bot",
+            WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
+            475, 50, 100, 35,
+            hwnd, (HMENU)DLG_RAIDHEALER, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
         g_hwndLeftRingDLG = CreateWindow(L"button", L"Left Ring",
             WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
             200, 100, 70, 35,
@@ -663,6 +780,33 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             {
                 CheckDlgButton(hwnd, DLG_NOBUFFS, BST_CHECKED);
                 g_bDeleteBuffs = true;
+            }
+            break;
+        }
+        case DLG_RAIDHEALER:
+        {
+            if (true == IsDlgButtonChecked(hwnd, DLG_RAIDHEALER))
+            {
+                CheckDlgButton(hwnd, DLG_RAIDHEALER, BST_UNCHECKED);
+                g_bRaidHealer = false;
+            }
+            else
+            {
+                CheckDlgButton(hwnd, DLG_RAIDHEALER, BST_CHECKED);
+                std::string strClass(g_pchCharacterClass);
+                //MessageBoxA(g_hwndMain, "Bruh", strClass.c_str(), MB_OK);
+                //strClass.resize(40);
+              
+                if (strClass.find("HolyKnight") != std::string::npos)
+                {
+                    InitializeHeals(1556, 1749);
+                }
+                else if (strClass.find("Guardian") != std::string::npos)
+                {
+                    InitializeHeals(7793, 7882);
+                }
+                EnableBattleState();
+                g_bRaidHealer = true;
             }
             break;
         }
@@ -902,7 +1046,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         g_szClassName,
         L"AutoFiesta",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 560, 780,
+        CW_USEDEFAULT, CW_USEDEFAULT, 660, 780,
         NULL, NULL, hInstance, NULL);
 
     if (g_hwndMain == NULL)

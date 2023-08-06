@@ -14,9 +14,15 @@ DWORD* g_pdwSendNormal = 0;
 DWORD* g_pdwCurrentEncryptionIndex = 0;
 WORD* g_pwCurrentEncryptionIndex = 0;
 WORD g_wCurrentEncryptionIndex = 0;
+DWORD* g_pdwSendSpecial = 0;
+DWORD* g_pdwCurrentEncryptionIndexSpecial = 0;
+WORD* g_pwCurrentEncryptionIndexSpecial = 0;
+//WORD g_wCurrentEncryptionIndex = 0;
+unsigned char targetID[2] = { 0 };
 
 // buff stuff
 volatile bool g_bDeleteBuffs = false;
+volatile bool g_bRaidHealer = false;
 
 // LH stuff
 WORD g_wCapsuleItem = 0;
@@ -34,9 +40,12 @@ enum CapsuleIDs
 //Base Pointers
 DWORD g_dwFiestaBase = 0;
 DWORD g_dwEntityPointer;
+DWORD* g_pdwPlayerBase;
+DWORD* g_pdwMana;
 BYTE* pbyPlayerID;
 DWORD g_dwCurrentWindow;
 DWORD* g_pdwLHCoins;
+char* g_pchCharacterClass;
 DWORD dwEntityFirstOffset = 0x28;
 DWORD dwEntitySecondOffset = 0x8;
 DWORD dwEntityThirdOffset = 0x2C8;
@@ -50,10 +59,20 @@ DWORD dwEntityMobNameOffset = 0x236;
 unsigned char playerID[2] = { 0xFF, 0xFF };
 
 std::string g_strCharToTarget;
+std::string g_strMassInviteFile;
+std::string g_strMassBanFile;
 typedef void(__stdcall* _encryptPacketFunc)(char* buffer, int numBytes);
 _encryptPacketFunc encryptPacketFunc;
 void sendEncryptPacketFunc(SOCKET socSendSocket, char* buffer, int numBytes) {
-    WORD* pwPacketEncryptionIndex = g_pwCurrentEncryptionIndex;
+	WORD* pwPacketEncryptionIndex = nullptr;
+	if (socSendSocket == *g_pdwSendNormal)
+	{
+		pwPacketEncryptionIndex = g_pwCurrentEncryptionIndex;
+	}
+	else
+	{
+		pwPacketEncryptionIndex = g_pwCurrentEncryptionIndexSpecial;
+	}
 
     //encryption index for normal packet stuff
     char* packetToEncrypt = new char[numBytes];
@@ -712,4 +731,149 @@ void AutoLH()
 			//Sleep(500);
 		}
 	}
+}
+void ExpoBan(std::string strName) {
+	//16 18 b0 5f 5f 5f 79 75 63 6b 79 5f 5f 5f 00 00 ..°___yucky___..
+	//00 00 00 00 00 00 00
+
+	char* packet = new char[23];
+	packet[0] = 0x16;
+	packet[1] = 0x18;
+	packet[2] = 0xb0;
+	for (int i = 3; i < 23; i++) {
+		if ((i - 3) < strName.length()) packet[i] = strName[i - 3];
+		else packet[i] = 0x00;
+	}
+
+	sendCrypt(*g_pdwSendSpecial, packet, 23, 1);
+	delete[] packet;
+
+}
+void ExpoInvite(std::string strName) {
+	//16 0c b0 50 65 6e 63 69 6c 76 65 73 74 65 72 00 00 .8Pencilvester.. send invite
+	//00 00 00 00 00 00
+
+	char* packet = new char[23];
+	packet[0] = 0x16;
+	packet[1] = 0x0c;
+	packet[2] = 0xb0;
+	for (int i = 3; i < 23; i++) {
+		if ((i - 3) < strName.length()) packet[i] = strName[i - 3];
+		else packet[i] = 0x00;
+	}
+
+	sendCrypt(*g_pdwSendSpecial, packet, 23, 1);
+	delete[] packet;
+
+}
+bool useSPStone() {
+	char packet[3] = { 0x02, 0x09, 0x50 };
+
+	sendCrypt(*g_pdwSendNormal, packet, 3, 0);
+
+	return true;
+}
+void EnableBattleState()
+{
+	char carrBattleState[4] = { 0x03, 0x08, 0x20, 0x02 };
+	sendCrypt(*g_pdwSendNormal, carrBattleState, 4, 0);
+}
+bool useSkill(skill* toUse, unsigned char mobId[2], float X, float Y) {
+
+	//06 40 24 b4 0f 33 14
+	bool used = 0;
+	if (*(WORD*)toUse->id == 0)
+	{
+		//MessageBox(g_hwndMain, L"Bruh", L"yuh1", MB_OK);
+		return true;
+	}
+	QueryPerformanceFrequency(&g_liSkillTimerCounter);
+	g_llSkillFreq = g_liSkillTimerCounter.QuadPart;
+
+	QueryPerformanceCounter(&g_liSkillTimerCounter);
+	g_llSkillCastTick = g_liSkillTimerCounter.QuadPart;
+	//float CDmod = 3.0; for zombies?
+	float CDmod = 1.7;
+	if ((g_llSkillCastTick - globalCooldown) / (g_llSkillFreq / 1000) <= 300) return false;
+
+	/*if (*mana >= lastMana && lastSkill != NULL){
+		if (*mana - lastMana >= 18) lastSkill->tickAtCast = 1; //my sp recovery is 15...
+	}*/
+
+	if (X == 0 && Y == 0)
+	{
+		//MessageBox(g_hwndMain, L"Bruh", L"yuh2", MB_OK);
+		char* packet = new char[7];
+		//cout << "time: " << (ticknow - toUse->tickAtCast) / (freq / 1000) << "\tcooldown: " << toUse.cooldown << endl;
+		if (((g_llSkillCastTick - toUse->tickAtCast) / (g_llSkillFreq / 1000)) >= (toUse->cooldown * 1000) || toUse->tickAtCast == 0)
+		{
+			//MessageBox(g_hwndMain, L"Bruh", L"yuh3", MB_OK);
+			//cout << dec << "Casting skill " << *(WORD*)toUse->id << "(Cooldown: " << toUse->cooldown << ", time elapsed: " << ((g_llSkillCastTick - toUse->tickAtCast) / (g_llSkillFreq / 1)) << ")" << endl;
+			if (1)
+			{
+				packet[0] = 0x06;
+				packet[1] = 0x40;
+				packet[2] = 0x24;
+				packet[3] = toUse->id[0];
+				packet[4] = toUse->id[1];
+				packet[5] = mobId[0];
+				packet[6] = mobId[1];
+
+				sendCrypt(*g_pdwSendNormal, packet, 7, 0);
+			}
+
+			Sleep(400);
+			QueryPerformanceCounter(&g_liSkillTimerCounter);
+			
+			used = true;
+			globalCooldown = g_liSkillTimerCounter.QuadPart;
+			toUse->tickAtCast = g_liSkillTimerCounter.QuadPart;
+			if (toUse->iAnimationTime > 0)
+			{
+				Sleep(toUse->iAnimationTime);
+			}
+
+		}
+		delete[] packet;
+	}
+	//0c 41 24 b8 10 87 3e 00 00 ca 38 00 00
+	else
+	{
+		char* packet = new char[13];
+		IDtoBYTE xpos, ypos;
+		xpos.id = (int)X;
+		ypos.id = (int)Y;
+		if (((g_llSkillCastTick - toUse->tickAtCast) / (g_llSkillFreq / 1000)) >= (toUse->cooldown * 1000) || toUse->tickAtCast == 0)
+		{
+			//cout << "Casting skill " << *(WORD*)toUse->id << endl;
+			packet[0] = 0x0C;
+			packet[1] = 0x41;
+			packet[2] = 0x24;
+			packet[3] = toUse->id[0];
+			packet[4] = toUse->id[1];
+			packet[5] = xpos.bytes[0];
+			packet[6] = xpos.bytes[1];
+			packet[7] = 0x00;
+			packet[8] = 0x00;
+			packet[9] = ypos.bytes[0];
+			packet[10] = ypos.bytes[1];
+			packet[11] = 0x00;
+			packet[12] = 0x00;
+
+			sendCrypt(*g_pdwSendNormal, packet, 13, 0);
+
+			//sendCrypt(*pdwSendNormal, packet, 13, 0);
+			//ReleaseKey('w', file_kbd);
+			Sleep(500);
+			QueryPerformanceCounter(&g_liSkillTimerCounter);
+			toUse->tickAtCast = g_liSkillTimerCounter.QuadPart;
+			used = true;
+
+			globalCooldown = g_liSkillTimerCounter.QuadPart;
+
+		}
+		delete[] packet;
+	}
+
+	return used;
 }

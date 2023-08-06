@@ -373,6 +373,34 @@ DWORD WINAPI CheckQuestsThread(LPVOID param)
 			}
 			g_strCharToTarget.clear();
 		}
+		if (false == g_strMassInviteFile.empty())
+		{
+			std::ifstream ifInviteFile;
+			std::string sCurrentLine;
+			ifInviteFile.open(g_strMassInviteFile.c_str(), std::ios::in);
+
+			while (ifInviteFile.peek() != EOF)
+			{
+				getline(ifInviteFile, sCurrentLine);
+				ExpoInvite(sCurrentLine);
+				Sleep(10);
+			}
+			g_strMassInviteFile.clear();
+		}
+		if (false == g_strMassBanFile.empty())
+		{
+			std::ifstream ifBanFile;
+			std::string sCurrentLine;
+			ifBanFile.open(g_strMassBanFile.c_str(), std::ios::in);
+
+			while (ifBanFile.peek() != EOF)
+			{
+				getline(ifBanFile, sCurrentLine);
+				ExpoBan(sCurrentLine);
+				Sleep(10);
+			}
+			g_strMassBanFile.clear();
+		}
 		if (true == g_bStartLHBot)
 		{
 			if (*g_pdwLHCoins < 1000)
@@ -406,6 +434,16 @@ DWORD WINAPI CheckQuestsThread(LPVOID param)
 
 			g_bStartLHBot = false;
 			SetWindowText(g_hwndLHRBTN, L"Start LH Bot");
+		}
+		if (true == g_bRaidHealer)
+		{
+			useSkill(&Heal, targetID, 0, 0);
+			useSkill(&Rejuv, targetID, 0, 0);
+			if (*g_pdwMana < 2000)
+			{
+				useSPStone();
+				Sleep(500);
+			}
 		}
 		if (true == g_bDeleteBuffs)
 		{
