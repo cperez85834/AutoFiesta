@@ -518,7 +518,7 @@ void __declspec(naked) SendPacketLogger()
 }
 void ToggleMobHP()
 {
-    DWORD dwOffset = 0x27C8B1;
+    DWORD dwOffset = 0x27C851;
     BYTE* pbyPatchAddy = (BYTE*)(g_dwFiestaBase + dwOffset);
     DWORD curProtection;
     VirtualProtect(pbyPatchAddy, 1, PAGE_EXECUTE_READWRITE, &curProtection);
@@ -540,28 +540,28 @@ void ToggleMobHP()
 void InitializeHooks()
 {
     //Start of encryption function at mov ebp,esp
-    DWORD dwLockEncryption = g_dwFiestaBase + 0x4A1A41; // done
+    DWORD dwLockEncryption = g_dwFiestaBase + 0x4A1C51; // done
     dwJmpSendLock = dwLockEncryption + 0x6;
 
     // After send is done
     // mov esp,ebp
-    DWORD dwUnlockEncryption = g_dwFiestaBase + 0x440A3F; // done
+    DWORD dwUnlockEncryption = g_dwFiestaBase + 0x440B8F; // done
     //dwJmpSendUnlock = dwUnlockEncryption + 0x7;
 
     //DWORD hookAddressMove = fiestaBase + 0x288918;
     //push ebx
     //push edi
-    DWORD dwHookPreEncryption = g_dwFiestaBase + 0x4A1A4D; //encryption hook, preRNG function done
+    DWORD dwHookPreEncryption = g_dwFiestaBase + 0x4A1C5D; //encryption hook, preRNG function done
     dwJmpBackSendLogger = dwHookPreEncryption + 0xA;
 
     //movaps xmm0,xmm1
     //comiss xmm1,xmm2
     //jna 0025300B
-    DWORD dwHookZoom = g_dwFiestaBase + 0x52FFB; //encryption hook, preRNG function done
+    DWORD dwHookZoom = g_dwFiestaBase + 0x52FBB; //encryption hook, preRNG function done
     dwJmpBackZoomHook = dwHookZoom + 0x6;
 
     //mov ecx, dword ptr ds:[eax+0x1000C]
-    DWORD dwHookRecv = g_dwFiestaBase + 0x440C8E;
+    DWORD dwHookRecv = g_dwFiestaBase + 0x440DDE;
     dwJmpBackRecvLogger = dwHookRecv + 0x6;
 
     //lea eax,dword ptr ss:[ebp-114]
@@ -570,7 +570,7 @@ void InitializeHooks()
     //jmpBackAuth = hookAuthentication + 0x6;
 
     //lea eax, ss:[ebp-0x104]
-    DWORD dwHookInfoTextBox = g_dwFiestaBase + 0x2C9007;
+    DWORD dwHookInfoTextBox = g_dwFiestaBase + 0x2C8FC7;
     dwJmpInfoTextBox = dwHookInfoTextBox + 0x6;
 
     //mov edx, dword ptr ss:[ebp-0xC]
@@ -598,34 +598,34 @@ DWORD WINAPI main(LPVOID param)
     //g_bDistributed = true;
     g_dwFiestaBase = (DWORD)GetModuleHandleA(NULL);
 
-    encryptPacketFunc = (_encryptPacketFunc)(g_dwFiestaBase + 0x4A1A40);
+    encryptPacketFunc = (_encryptPacketFunc)(g_dwFiestaBase + 0x4A1C50);
 
     // Do not attach until the send address is non-null
-    while (*(DWORD*)(g_dwFiestaBase + 0x79B06C) == 0)
+    while (*(DWORD*)(g_dwFiestaBase + 0x79A06C) == 0)
     {
         Sleep(100);
     }
 
-    g_pdwSendNormal = (DWORD*)(*(DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79B06C) + 0x10038) + 0x4); //difference is 0x0
-    g_pdwCurrentEncryptionIndex = (DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79B06C) + 0x10038);
+    g_pdwSendNormal = (DWORD*)(*(DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79A06C) + 0x10038) + 0x4); //difference is 0x0
+    g_pdwCurrentEncryptionIndex = (DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79A06C) + 0x10038);
     g_pwCurrentEncryptionIndex = (WORD*)(*(DWORD*)(g_pdwCurrentEncryptionIndex));
 
-    g_pdwSendSpecial = (DWORD*)(*(DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79B084) + 0x10038) + 0x4); //difference is 0x0
-    g_pdwCurrentEncryptionIndexSpecial = (DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79B084) + 0x10038);
+    g_pdwSendSpecial = (DWORD*)(*(DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79A084) + 0x10038) + 0x4); //difference is 0x0
+    g_pdwCurrentEncryptionIndexSpecial = (DWORD*)(*(DWORD*)(g_dwFiestaBase + 0x79A084) + 0x10038);
     g_pwCurrentEncryptionIndexSpecial = (WORD*)(*(DWORD*)(g_pdwCurrentEncryptionIndexSpecial));
 
    // MessageBox(NULL, L"Look!", std::to_wstring(g_dwFiestaBase).c_str(),
       //  MB_ICONEXCLAMATION | MB_OK);
-    int questPointerOffset = 0x87E84C;
+    int questPointerOffset = 0x87D844;
     g_pdwQuestPointer = (DWORD*)(g_dwFiestaBase + questPointerOffset);
     g_pdwQuestNumberPointer = (DWORD*)(g_dwFiestaBase + (questPointerOffset - 0x8));
 
-    g_dwEntityPointer = g_dwFiestaBase + 0x85C1C8;// 0x7193F0;
-    g_dwCurrentWindow = g_dwFiestaBase + 0x882630;
-    g_pdwLHCoins = (DWORD*)(g_dwFiestaBase + 0x785620);
-    g_pchCharacterClass = (char*)(g_dwFiestaBase + 0x85E098);
+    g_dwEntityPointer = g_dwFiestaBase + 0x85B1C0;// 0x7193F0;
+    g_dwCurrentWindow = g_dwFiestaBase + 0x881628;
+    g_pdwLHCoins = (DWORD*)(g_dwFiestaBase + 0x784620);
+    g_pchCharacterClass = (char*)(g_dwFiestaBase + 0x85D090);
     //g_pdwPlayerBase = (DWORD*)(g_dwFiestaBase + 0x85C39C);
-    g_pdwMana = (DWORD*)(g_dwFiestaBase + 0x784C00); // done just cheat engine mana
+    g_pdwMana = (DWORD*)(g_dwFiestaBase + 0x783C00); // done just cheat engine mana
  
     InitializeHooks();
 
